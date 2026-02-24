@@ -1,18 +1,17 @@
 package com.vidasync_bff.controller
 
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
-class HealthController(
-    @Value("\${openai.api-key:}") private val openaiKey: String,
-    @Value("\${supabase.url:}") private val supabaseUrl: String,
-    @Value("\${supabase.anon-key:}") private val supabaseKey: String
-) {
+class HealthController {
 
     @GetMapping("/health")
     fun health(): Map<String, Any> {
+        val openaiKey = System.getenv("OPENAI_API_KEY") ?: ""
+        val supabaseUrl = System.getenv("SUPABASE_URL") ?: ""
+        val supabaseKey = System.getenv("SUPABASE_ANON_KEY") ?: ""
+
         return mapOf(
             "status" to "UP",
             "env" to mapOf(
