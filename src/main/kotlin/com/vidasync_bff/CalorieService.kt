@@ -9,10 +9,11 @@ import org.springframework.stereotype.Service
 
 @Service
 class CalorieService(
-    @Value("\${openai.api-key}") private val apiKey: String
+    @Value("\${openai.api-key:}") private val apiKey: String
 ) {
 
     private val client: OpenAIClient by lazy {
+        if (apiKey.isBlank()) throw IllegalStateException("OPENAI_API_KEY não configurada. Adicione a variável de ambiente.")
         OpenAIOkHttpClient.builder()
             .apiKey(apiKey)
             .build()
