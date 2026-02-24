@@ -15,9 +15,30 @@ Backend For Frontend (BFF) do VidaSync — API responsável por intermediar o fr
 
 ---
 
+## 📁 Estrutura do Projeto
+
+```
+com.vidasync_bff/
+├── VidasyncBffApplication.kt          # Entry point
+├── config/
+│   └── OpenAIConfig.kt                # Bean do client OpenAI
+├── controller/
+│   ├── HealthController.kt            # GET /health
+│   └── NutritionController.kt         # POST /nutrition/calories
+├── dto/
+│   ├── request/
+│   │   └── CalorieRequest.kt
+│   └── response/
+│       └── CalorieResponse.kt
+└── service/
+    └── NutritionService.kt            # Lógica de negócio + OpenAI
+```
+
+---
+
 ## ⚙️ Variáveis de Ambiente
 
-Configure as seguintes variáveis no Railway (ou no seu `.env` local):
+Configure no Railway ou no arquivo `.env.properties` local:
 
 | Variável | Descrição |
 |---|---|
@@ -29,15 +50,15 @@ Configure as seguintes variáveis no Railway (ou no seu `.env` local):
 
 ## 📡 Rotas
 
-### 🔹 Hello World
+### 🔹 Health Check
 
 ```
-GET /hello
+GET /health
 ```
 
 **Resposta:**
-```
-Hello, World!
+```json
+{ "status": "UP" }
 ```
 
 ---
@@ -58,10 +79,19 @@ Content-Type: application/json
 }
 ```
 
-**Response:**
+**Response (sucesso):**
 ```json
 {
-  "result": "- 2 ovos mexidos: ~180 kcal\n- 1 fatia de pão integral: ~70 kcal\n- 1 banana: ~90 kcal\n\nTotal: ~340 kcal"
+  "result": "2 ovos mexidos: 180 kcal\n1 fatia de pão integral: 70 kcal\n1 banana: 90 kcal\nTotal: 340 kcal",
+  "error": null
+}
+```
+
+**Response (erro):**
+```json
+{
+  "result": null,
+  "error": "mensagem do erro"
 }
 ```
 
@@ -69,6 +99,14 @@ Content-Type: application/json
 
 ## 🏃 Rodando localmente
 
+1. Crie o arquivo `.env.properties` na raiz do projeto:
+```properties
+OPENAI_API_KEY=sua_chave
+SUPABASE_URL=sua_url
+SUPABASE_ANON_KEY=sua_chave_anon
+```
+
+2. Rode:
 ```bash
 ./gradlew bootRun
 ```
@@ -77,13 +115,6 @@ A API estará disponível em: `http://localhost:8080`
 
 ---
 
-## 📦 Build
-
-```bash
-./gradlew bootJar
-```
-
----
 
 ## 🐳 Docker
 
