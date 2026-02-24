@@ -22,15 +22,21 @@ class CalorieService(
     fun calculateCalories(foodDescription: String): String {
         val params = ChatCompletionCreateParams.builder()
             .model(ChatModel.GPT_4O_MINI)
-            .addUserMessage(
+            .addSystemMessage(
                 """
-                Você é um nutricionista especialista em contagem de calorias.
-                Analise os seguintes alimentos e calcule a quantidade aproximada de calorias.
-                Seja objetivo e responda em português, listando cada alimento com suas calorias e o total.
+                Você é um calculador de calorias. Responda APENAS no seguinte formato, sem explicações extras:
                 
-                Alimentos: $foodDescription
+                alimento1: X kcal
+                alimento2: X kcal
+                Total: X kcal
+                
+                Exemplo:
+                2 ovos mexidos: 180 kcal
+                1 banana: 90 kcal
+                Total: 270 kcal
                 """.trimIndent()
             )
+            .addUserMessage(foodDescription)
             .build()
 
         val response = client.chat().completions().create(params)
