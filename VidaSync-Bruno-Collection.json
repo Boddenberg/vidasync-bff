@@ -1,0 +1,249 @@
+{
+  "name": "VidaSync",
+  "version": "1",
+  "items": [
+    {
+      "type": "http",
+      "name": "Health Check",
+      "filename": "Health Check.bru",
+      "seq": 1,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/health",
+        "method": "GET",
+        "headers": [],
+        "params": [],
+        "body": { "mode": "none" },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Calcular Calorias",
+      "filename": "Calcular Calorias.bru",
+      "seq": 2,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/nutrition/calories",
+        "method": "POST",
+        "headers": [{ "name": "Content-Type", "value": "application/json", "enabled": true }],
+        "params": [],
+        "body": {
+          "mode": "json",
+          "json": "{\n  \"foods\": \"uma paçoquinha\"\n}"
+        },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Criar Refeição (com nutrition)",
+      "filename": "Criar Refeição (com nutrition).bru",
+      "seq": 3,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals",
+        "method": "POST",
+        "headers": [{ "name": "Content-Type", "value": "application/json", "enabled": true }],
+        "params": [],
+        "body": {
+          "mode": "json",
+          "json": "{\n  \"foods\": \"arroz e feijão\",\n  \"mealType\": \"lunch\",\n  \"date\": \"2026-02-24\",\n  \"time\": \"12:30\",\n  \"nutrition\": {\n    \"calories\": \"400 kcal\",\n    \"protein\": \"18g\",\n    \"carbs\": \"60g\",\n    \"fat\": \"8g\"\n  }\n}"
+        },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Criar Refeição (IA calcula)",
+      "filename": "Criar Refeição (IA calcula).bru",
+      "seq": 4,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals",
+        "method": "POST",
+        "headers": [{ "name": "Content-Type", "value": "application/json", "enabled": true }],
+        "params": [],
+        "body": {
+          "mode": "json",
+          "json": "{\n  \"foods\": \"whey + banana\",\n  \"mealType\": \"snack\",\n  \"date\": \"2026-02-24\",\n  \"time\": \"16:00\"\n}"
+        },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Listar Refeições por Data",
+      "filename": "Listar Refeições por Data.bru",
+      "seq": 5,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals?date=2026-02-24",
+        "method": "GET",
+        "headers": [],
+        "params": [{ "name": "date", "value": "2026-02-24", "enabled": true, "type": "query" }],
+        "body": { "mode": "none" },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Resumo do Dia (Summary)",
+      "filename": "Resumo do Dia (Summary).bru",
+      "seq": 6,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals/summary?date=2026-02-24",
+        "method": "GET",
+        "headers": [],
+        "params": [{ "name": "date", "value": "2026-02-24", "enabled": true, "type": "query" }],
+        "body": { "mode": "none" },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Buscar por Período (Range)",
+      "filename": "Buscar por Período (Range).bru",
+      "seq": 7,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals/range?startDate=2026-02-01&endDate=2026-02-28",
+        "method": "GET",
+        "headers": [],
+        "params": [
+          { "name": "startDate", "value": "2026-02-01", "enabled": true, "type": "query" },
+          { "name": "endDate", "value": "2026-02-28", "enabled": true, "type": "query" }
+        ],
+        "body": { "mode": "none" },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Atualizar Refeição (completo)",
+      "filename": "Atualizar Refeição (completo).bru",
+      "seq": 8,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals/SEU_MEAL_ID_AQUI",
+        "method": "PUT",
+        "headers": [{ "name": "Content-Type", "value": "application/json", "enabled": true }],
+        "params": [],
+        "body": {
+          "mode": "json",
+          "json": "{\n  \"foods\": \"arroz integral + frango grelhado\",\n  \"mealType\": \"lunch\",\n  \"date\": \"2026-02-24\",\n  \"time\": \"13:00\",\n  \"nutrition\": {\n    \"calories\": \"500 kcal\",\n    \"protein\": \"35g\",\n    \"carbs\": \"55g\",\n    \"fat\": \"10g\"\n  }\n}"
+        },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Atualizar Refeição (parcial - só horário)",
+      "filename": "Atualizar Refeição (parcial).bru",
+      "seq": 9,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals/SEU_MEAL_ID_AQUI",
+        "method": "PUT",
+        "headers": [{ "name": "Content-Type", "value": "application/json", "enabled": true }],
+        "params": [],
+        "body": {
+          "mode": "json",
+          "json": "{\n  \"time\": \"14:00\"\n}"
+        },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Deletar Refeição",
+      "filename": "Deletar Refeição.bru",
+      "seq": 10,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals/SEU_MEAL_ID_AQUI",
+        "method": "DELETE",
+        "headers": [],
+        "params": [],
+        "body": { "mode": "none" },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Duplicar Refeição",
+      "filename": "Duplicar Refeição.bru",
+      "seq": 11,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/meals/SEU_MEAL_ID_AQUI/duplicate",
+        "method": "POST",
+        "headers": [],
+        "params": [],
+        "body": { "mode": "none" },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Listar Favoritos",
+      "filename": "Listar Favoritos.bru",
+      "seq": 12,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/favorites",
+        "method": "GET",
+        "headers": [],
+        "params": [],
+        "body": { "mode": "none" },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Criar Favorito (com imagem)",
+      "filename": "Criar Favorito (com imagem).bru",
+      "seq": 13,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/favorites",
+        "method": "POST",
+        "headers": [{ "name": "Content-Type", "value": "application/json", "enabled": true }],
+        "params": [],
+        "body": {
+          "mode": "json",
+          "json": "{\n  \"foods\": \"arroz, feijão, bife\",\n  \"nutrition\": {\n    \"calories\": \"450 kcal\",\n    \"protein\": \"30g\",\n    \"carbs\": \"50g\",\n    \"fat\": \"12g\"\n  },\n  \"image\": \"data:image/jpeg;base64,/9j/4AAQSkZJRg...\"\n}"
+        },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Criar Favorito (sem imagem)",
+      "filename": "Criar Favorito (sem imagem).bru",
+      "seq": 14,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/favorites",
+        "method": "POST",
+        "headers": [{ "name": "Content-Type", "value": "application/json", "enabled": true }],
+        "params": [],
+        "body": {
+          "mode": "json",
+          "json": "{\n  \"foods\": \"paçoquinha\",\n  \"nutrition\": {\n    \"calories\": \"120 kcal\",\n    \"protein\": \"3g\",\n    \"carbs\": \"14g\",\n    \"fat\": \"6g\"\n  }\n}"
+        },
+        "auth": { "mode": "inherit" }
+      }
+    },
+    {
+      "type": "http",
+      "name": "Deletar Favorito",
+      "filename": "Deletar Favorito.bru",
+      "seq": 15,
+      "request": {
+        "url": "https://vidasync-bff-production.up.railway.app/favorites/SEU_FAVORITE_ID_AQUI",
+        "method": "DELETE",
+        "headers": [],
+        "params": [],
+        "body": { "mode": "none" },
+        "auth": { "mode": "inherit" }
+      }
+    }
+  ],
+  "environments": [],
+  "brunoConfig": {
+    "version": "1",
+    "name": "VidaSync",
+    "type": "collection",
+    "ignore": ["node_modules", ".git"],
+    "size": 0,
+    "filesCount": 0
+  }
+}
