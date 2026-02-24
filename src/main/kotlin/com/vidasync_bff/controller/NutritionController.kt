@@ -18,12 +18,14 @@ class NutritionController(private val nutritionService: NutritionService) {
 
     @PostMapping("/calories")
     fun calculateCalories(@RequestBody request: CalorieRequest): ResponseEntity<CalorieResponse> {
-        log.info("POST /nutrition/calories - foods: {}", request.foods)
+        log.info("POST /nutrition/calories | foods={}", request.foods)
         return try {
             val nutrition = nutritionService.calculateNutrition(request.foods)
+            log.info("POST /nutrition/calories → 200 | calories={}, protein={}, carbs={}, fat={}",
+                nutrition.calories, nutrition.protein, nutrition.carbs, nutrition.fat)
             ResponseEntity.ok(CalorieResponse(nutrition = nutrition))
         } catch (e: Exception) {
-            log.error("Erro ao calcular calorias: {}", e.message, e)
+            log.error("POST /nutrition/calories → 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(CalorieResponse(error = e.message))
         }
     }

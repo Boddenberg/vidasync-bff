@@ -15,31 +15,40 @@ class FavoriteController(private val favoriteService: FavoriteService) {
 
     @PostMapping
     fun create(@RequestBody request: CreateFavoriteRequest): ResponseEntity<Any> {
+        log.info("POST /favorites | foods={}, hasNutrition={}, hasImage={}",
+            request.foods, request.nutrition != null, request.image != null)
         return try {
-            ResponseEntity.status(HttpStatus.CREATED).body(mapOf("favorite" to favoriteService.create(request)))
+            val result = favoriteService.create(request)
+            log.info("POST /favorites → 201 | id={}, imageUrl={}", result.id, result.imageUrl)
+            ResponseEntity.status(HttpStatus.CREATED).body(mapOf("favorite" to result))
         } catch (e: Exception) {
-            log.error("Erro ao criar favorito: {}", e.message, e)
+            log.error("POST /favorites → 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
 
     @GetMapping
     fun getAll(): ResponseEntity<Any> {
+        log.info("GET /favorites")
         return try {
-            ResponseEntity.ok(mapOf("favorites" to favoriteService.getAll()))
+            val result = favoriteService.getAll()
+            log.info("GET /favorites → 200 | count={}", result.size)
+            ResponseEntity.ok(mapOf("favorites" to result))
         } catch (e: Exception) {
-            log.error("Erro ao buscar favoritos: {}", e.message, e)
+            log.error("GET /favorites → 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
 
     @DeleteMapping("/{id}")
     fun delete(@PathVariable id: String): ResponseEntity<Any> {
+        log.info("DELETE /favorites/{}", id)
         return try {
             favoriteService.delete(id)
+            log.info("DELETE /favorites/{} → 200 | deleted", id)
             ResponseEntity.ok(mapOf("success" to true))
         } catch (e: Exception) {
-            log.error("Erro ao deletar favorito: {}", e.message, e)
+            log.error("DELETE /favorites/{} → 500 | error={}", id, e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }

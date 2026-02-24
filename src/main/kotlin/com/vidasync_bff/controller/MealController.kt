@@ -15,30 +15,41 @@ class MealController(private val mealService: MealService) {
 
     @PostMapping
     fun create(@RequestBody request: CreateMealRequest): ResponseEntity<Any> {
+        log.info("POST /meals | foods={}, mealType={}, date={}, time={}, hasNutrition={}",
+            request.foods, request.mealType, request.date, request.time, request.nutrition != null)
         return try {
-            ResponseEntity.ok(mapOf("meal" to mealService.create(request)))
+            val result = mealService.create(request)
+            log.info("POST /meals → 200 | id={}", result.id)
+            ResponseEntity.ok(mapOf("meal" to result))
         } catch (e: Exception) {
-            log.error("Erro ao criar refeição: {}", e.message, e)
+            log.error("POST /meals → 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
 
     @GetMapping
     fun getByDate(@RequestParam date: String): ResponseEntity<Any> {
+        log.info("GET /meals | date={}", date)
         return try {
-            ResponseEntity.ok(mapOf("meals" to mealService.getByDate(date)))
+            val result = mealService.getByDate(date)
+            log.info("GET /meals → 200 | date={}, count={}", date, result.size)
+            ResponseEntity.ok(mapOf("meals" to result))
         } catch (e: Exception) {
-            log.error("Erro ao buscar refeições: {}", e.message, e)
+            log.error("GET /meals → 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
 
     @GetMapping("/summary")
     fun getDaySummary(@RequestParam date: String): ResponseEntity<Any> {
+        log.info("GET /meals/summary | date={}", date)
         return try {
-            ResponseEntity.ok(mealService.getDaySummary(date))
+            val result = mealService.getDaySummary(date)
+            log.info("GET /meals/summary → 200 | date={}, totalMeals={}, totals={}",
+                date, result.totalMeals, result.totals)
+            ResponseEntity.ok(result)
         } catch (e: Exception) {
-            log.error("Erro ao gerar resumo do dia: {}", e.message, e)
+            log.error("GET /meals/summary → 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
@@ -48,41 +59,53 @@ class MealController(private val mealService: MealService) {
         @RequestParam startDate: String,
         @RequestParam endDate: String
     ): ResponseEntity<Any> {
+        log.info("GET /meals/range | startDate={}, endDate={}", startDate, endDate)
         return try {
-            ResponseEntity.ok(mapOf("meals" to mealService.getByDateRange(startDate, endDate)))
+            val result = mealService.getByDateRange(startDate, endDate)
+            log.info("GET /meals/range → 200 | period={} to {}, count={}", startDate, endDate, result.size)
+            ResponseEntity.ok(mapOf("meals" to result))
         } catch (e: Exception) {
-            log.error("Erro ao buscar refeições por período: {}", e.message, e)
+            log.error("GET /meals/range → 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
 
     @PutMapping("/{id}")
     fun update(@PathVariable id: String, @RequestBody request: UpdateMealRequest): ResponseEntity<Any> {
+        log.info("PUT /meals/{} | foods={}, mealType={}, date={}, time={}, hasNutrition={}",
+            id, request.foods, request.mealType, request.date, request.time, request.nutrition != null)
         return try {
-            ResponseEntity.ok(mapOf("meal" to mealService.update(id, request)))
+            val result = mealService.update(id, request)
+            log.info("PUT /meals/{} → 200 | updated", id)
+            ResponseEntity.ok(mapOf("meal" to result))
         } catch (e: Exception) {
-            log.error("Erro ao atualizar refeição: {}", e.message, e)
+            log.error("PUT /meals/{} → 500 | error={}", id, e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
 
     @DeleteMapping("/{id}")
     fun delete(@PathVariable id: String): ResponseEntity<Any> {
+        log.info("DELETE /meals/{}", id)
         return try {
             mealService.delete(id)
+            log.info("DELETE /meals/{} → 200 | deleted", id)
             ResponseEntity.ok(mapOf("success" to true))
         } catch (e: Exception) {
-            log.error("Erro ao deletar refeição: {}", e.message, e)
+            log.error("DELETE /meals/{} → 500 | error={}", id, e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
 
     @PostMapping("/{id}/duplicate")
     fun duplicate(@PathVariable id: String): ResponseEntity<Any> {
+        log.info("POST /meals/{}/duplicate", id)
         return try {
-            ResponseEntity.ok(mapOf("meal" to mealService.duplicate(id)))
+            val result = mealService.duplicate(id)
+            log.info("POST /meals/{}/duplicate → 200 | newId={}", id, result.id)
+            ResponseEntity.ok(mapOf("meal" to result))
         } catch (e: Exception) {
-            log.error("Erro ao duplicar refeição: {}", e.message, e)
+            log.error("POST /meals/{}/duplicate → 500 | error={}", id, e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
