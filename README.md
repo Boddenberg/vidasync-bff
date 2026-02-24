@@ -65,7 +65,7 @@ GET /health
 
 ### 🔹 Calcular Calorias com IA
 
-Recebe uma descrição de alimentos em texto livre e retorna o cálculo de calorias processado pelo GPT.
+Recebe uma descrição de alimentos em texto livre e retorna calorias + macronutrientes.
 
 ```
 POST /nutrition/calories
@@ -82,7 +82,12 @@ Content-Type: application/json
 **Response (sucesso):**
 ```json
 {
-  "result": "2 ovos mexidos: 180 kcal\n1 fatia de pão integral: 70 kcal\n1 banana: 90 kcal\nTotal: 340 kcal",
+  "nutrition": {
+    "calories": "340 kcal",
+    "protein": "18g",
+    "carbs": "45g",
+    "fat": "10g"
+  },
   "error": null
 }
 ```
@@ -90,7 +95,7 @@ Content-Type: application/json
 **Response (erro):**
 ```json
 {
-  "result": null,
+  "nutrition": null,
   "error": "mensagem do erro"
 }
 ```

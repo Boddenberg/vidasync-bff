@@ -20,8 +20,8 @@ class NutritionController(private val nutritionService: NutritionService) {
     fun calculateCalories(@RequestBody request: CalorieRequest): ResponseEntity<CalorieResponse> {
         log.info("POST /nutrition/calories - foods: {}", request.foods)
         return try {
-            val result = nutritionService.calculateCalories(request.foods)
-            ResponseEntity.ok(CalorieResponse(result = result))
+            val nutrition = nutritionService.calculateNutrition(request.foods)
+            ResponseEntity.ok(CalorieResponse(nutrition = nutrition))
         } catch (e: Exception) {
             log.error("Erro ao calcular calorias: {}", e.message, e)
             ResponseEntity.internalServerError().body(CalorieResponse(error = e.message))
