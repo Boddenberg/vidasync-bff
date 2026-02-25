@@ -127,9 +127,9 @@ class NutritionService(
             }
         }
 
-        // Se TODOS são inválidos
-        if (allIngredients.isEmpty() && invalidItems.isNotEmpty()) {
-            log.warn("Nenhum alimento válido encontrado: {}", invalidItems)
+        // Se QUALQUER item for inválido → rejeita tudo
+        if (invalidItems.isNotEmpty()) {
+            log.warn("Itens inválidos encontrados: {} → rejeitando tudo", invalidItems)
             return CalorieResponse(
                 nutrition = null,
                 invalidItems = invalidItems
