@@ -8,5 +8,6 @@ data class CreateMealRequest(
     val date: String,
     val time: String? = null,
     val nutrition: NutritionData? = null,
-    val image: String? = null
+    val image: String? = null,
+    val imageUrl: String? = null
 )

@@ -8,5 +8,6 @@ data class UpdateMealRequest(
     val date: String? = null,
     val time: String? = null,
     val nutrition: NutritionData? = null,
-    val image: String? = null
+    val image: String? = null,
+    val imageUrl: String? = null
 )

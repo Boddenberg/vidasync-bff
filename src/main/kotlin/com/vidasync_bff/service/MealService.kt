@@ -165,14 +165,42 @@ class MealService(
         return MealResponse.from(rows!!.first())
     }
 
-    private fun uploadImage(base64: String?, prefix: String): String? {
-        return base64?.takeIf { it.isNotBlank() }?.let {
-            try {
-                storageClient.uploadBase64Image(it, prefix, mealImagesBucket)
-            } catch (e: Exception) {
-                log.error("Erro ao fazer upload da imagem de refeição: {}", e.message)
+    private fun resolveImageUrl(base64: String?, directUrl: String?): String? {
+        return when {
+            !base64.isNullOrBlank() -> {
+                log.info("Imagem base64 recebida, fazendo upload...")
+                uploadImage(base64, "meal")
+            }
+            !directUrl.isNullOrBlank() -> {
+                log.info("imageUrl recebida diretamente: {}", directUrl)
+                directUrl
+            }
+            else -> {
+                log.info("Nenhuma imagem fornecida")
                 null
             }
+        }
+    }
+
+    private fun uploadImage(base64: String?, prefix: String): String? {
+        if (base64 == null) {
+            log.info("Sem imagem para upload (null)")
+            return null
+        }
+        if (base64.isBlank()) {
+            log.info("Sem imagem para upload (blank)")
+            return null
+        }
+        log.info("Imagem recebida para upload: prefix={}, bucket={}, base64Length={}, startsWith={}",
+            prefix, mealImagesBucket, base64.length, base64.take(30))
+        return try {
+            val url = storageClient.uploadBase64Image(base64, prefix, mealImagesBucket)
+            log.info("Upload de imagem concluído com sucesso: {}", url)
+            url
+        } catch (e: Exception) {
+            log.error("FALHA no upload da imagem: bucket={}, prefix={}, exception={}, message={}",
+                mealImagesBucket, prefix, e.javaClass.simpleName, e.message, e)
+            null
         }
     }
 

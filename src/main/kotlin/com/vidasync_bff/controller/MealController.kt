@@ -15,8 +15,8 @@ class MealController(private val mealService: MealService) {
 
     @PostMapping
     fun create(@RequestHeader("X-User-Id") userId: String, @RequestBody body: CreateMealRequest): ResponseEntity<Any> {
-        log.info("POST /meals | userId={}, foods={}, mealType={}, date={}, time={}, hasNutrition={}",
-            userId, body.foods, body.mealType, body.date, body.time, body.nutrition != null)
+        log.info("POST /meals | userId={}, foods={}, mealType={}, date={}, time={}, hasNutrition={}, hasImage={}",
+            userId, body.foods, body.mealType, body.date, body.time, body.nutrition != null, body.image != null)
         return try {
             val result = mealService.create(userId, body)
             log.info("POST /meals → 200 | id={}", result.id)
