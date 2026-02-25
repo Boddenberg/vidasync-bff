@@ -102,7 +102,8 @@ class MealService(
     }
 
     fun update(userId: String, id: String, request: UpdateMealRequest): MealResponse {
-        log.info("Atualizando refeição: userId={}, id={}, hasImage={}", userId, id, request.image != null)
+        log.info("Atualizando refeição: userId={}, id={}, hasImage={}, hasImageUrl={}",
+            userId, id, request.image != null, request.imageUrl != null)
 
         val body = mutableMapOf<String, Any>()
         request.foods?.let { body["foods"] = it }
@@ -116,8 +117,8 @@ class MealService(
             body["fat"] = it.fat
         }
 
-        // Upload new image if provided
-        val imageUrl = uploadImage(request.image, "meal")
+        // Resolve image: base64 → upload, imageUrl → use directly
+        val imageUrl = resolveImageUrl(request.image, request.imageUrl)
         imageUrl?.let { body["image_url"] = it }
 
         val rows = supabaseClient.patch(
