@@ -133,11 +133,11 @@ const apiFetch = async (path: string, options: RequestInit = {}) => {
 
 | Método | Rota | Body | Resposta |
 |--------|------|------|----------|
-| `POST` | `/meals` | `{ foods, mealType, date, time?, nutrition? }` | `{ meal: {...} }` |
-| `GET` | `/meals?date=2026-02-24` | — | `{ meals: [...] }` |
+| `POST` | `/meals` | `{ foods, mealType, date, time?, nutrition?, image? }` | `{ meal: {..., imageUrl} }` |
+| `GET` | `/meals?date=2026-02-24` | — | `{ meals: [...] }` (cada meal tem `imageUrl`) |
 | `GET` | `/meals/summary?date=2026-02-24` | — | `{ date, totalMeals, meals, totals }` |
 | `GET` | `/meals/range?startDate=...&endDate=...` | — | `{ meals: [...] }` |
-| `PUT` | `/meals/{id}` | `{ foods?, mealType?, date?, time?, nutrition? }` | `{ meal: {...} }` |
+| `PUT` | `/meals/{id}` | `{ foods?, mealType?, date?, time?, nutrition?, image? }` | `{ meal: {..., imageUrl} }` |
 | `DELETE` | `/meals/{id}` | — | `{ success: true }` |
 | `POST` | `/meals/{id}/duplicate` | — | `{ meal: {...} }` |
 

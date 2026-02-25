@@ -9,6 +9,9 @@ ALTER TABLE meals ADD COLUMN IF NOT EXISTS time text;
 -- 2. Adicionar coluna 'image_url' na tabela favorite_meals
 ALTER TABLE favorite_meals ADD COLUMN IF NOT EXISTS image_url text;
 
+-- 2b. Adicionar coluna 'image_url' na tabela meals
+ALTER TABLE meals ADD COLUMN IF NOT EXISTS image_url text;
+
 -- 3. Adicionar coluna 'user_id' nas tabelas
 ALTER TABLE meals ADD COLUMN IF NOT EXISTS user_id UUID;
 ALTER TABLE favorite_meals ADD COLUMN IF NOT EXISTS user_id UUID;

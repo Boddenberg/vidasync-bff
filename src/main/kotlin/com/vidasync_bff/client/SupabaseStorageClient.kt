@@ -45,6 +45,10 @@ class SupabaseStorageClient(
      * @return the public URL of the uploaded image
      */
     fun uploadBase64Image(base64Data: String, fileNamePrefix: String = "fav"): String {
+        return uploadBase64Image(base64Data, fileNamePrefix, bucket)
+    }
+
+    fun uploadBase64Image(base64Data: String, fileNamePrefix: String, targetBucket: String): String {
         // Strip the data URI prefix if present
         val raw = if (base64Data.contains(",")) {
             base64Data.substringAfter(",")
@@ -63,10 +67,10 @@ class SupabaseStorageClient(
         val bytes = Base64.getDecoder().decode(raw)
         val fileName = "${fileNamePrefix}_${UUID.randomUUID()}.$extension"
 
-        log.info("Uploading image to storage: bucket={}, file={}, size={} bytes", bucket, fileName, bytes.size)
+        log.info("Uploading image to storage: bucket={}, file={}, size={} bytes", targetBucket, fileName, bytes.size)
 
         storageClient.post()
-            .uri { it.path("/object/$bucket/$fileName").build() }
+            .uri { it.path("/object/$targetBucket/$fileName").build() }
             .contentType(MediaType.parseMediaType(contentType))
             .header("x-upsert", "true")
             .body(bytes)
@@ -80,7 +84,7 @@ class SupabaseStorageClient(
             normalized = "https://$normalized"
         }
 
-        val publicUrl = "$normalized/storage/v1/object/public/$bucket/$fileName"
+        val publicUrl = "$normalized/storage/v1/object/public/$targetBucket/$fileName"
         log.info("Image uploaded: {}", publicUrl)
         return publicUrl
     }

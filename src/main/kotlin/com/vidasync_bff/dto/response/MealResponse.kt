@@ -14,6 +14,7 @@ data class SupabaseMealRow(
     val protein: String?,
     val carbs: String?,
     val fat: String?,
+    @JsonProperty("image_url") val imageUrl: String?,
     @JsonProperty("created_at") val createdAt: String
 )
 
@@ -24,6 +25,7 @@ data class MealResponse(
     val date: String,
     val time: String?,
     val nutrition: NutritionData,
+    val imageUrl: String?,
     val createdAt: String
 ) {
     companion object {
@@ -39,6 +41,7 @@ data class MealResponse(
                 carbs = row.carbs ?: "0g",
                 fat = row.fat ?: "0g"
             ),
+            imageUrl = row.imageUrl,
             createdAt = row.createdAt
         )
     }

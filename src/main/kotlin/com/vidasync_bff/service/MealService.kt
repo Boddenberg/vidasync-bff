@@ -1,6 +1,7 @@
 package com.vidasync_bff.service
 
 import com.vidasync_bff.client.SupabaseClient
+import com.vidasync_bff.client.SupabaseStorageClient
 import com.vidasync_bff.dto.request.CreateMealRequest
 import com.vidasync_bff.dto.request.UpdateMealRequest
 import com.vidasync_bff.dto.response.DaySummaryResponse
@@ -16,19 +17,24 @@ import java.time.format.DateTimeFormatter
 @Service
 class MealService(
     private val supabaseClient: SupabaseClient,
-    private val nutritionService: NutritionService
+    private val nutritionService: NutritionService,
+    private val storageClient: SupabaseStorageClient
 ) {
 
     private val log = LoggerFactory.getLogger(MealService::class.java)
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    private val mealImagesBucket = "meal-images"
 
     fun create(userId: String, request: CreateMealRequest): MealResponse {
-        log.info("Criando refeição: userId={}, {} - {}", userId, request.mealType, request.foods)
+        log.info("Criando refeição: userId={}, {} - {}, hasImage={}", userId, request.mealType, request.foods, request.image != null)
 
         val nutrition = request.nutrition ?: nutritionService.calculateNutrition(request.foods)
         val time = request.time ?: LocalTime.now().format(timeFormatter)
 
-        val body = mapOf(
+        // Upload image if provided
+        val imageUrl = uploadImage(request.image, "meal")
+
+        val body = mutableMapOf<String, Any>(
             "user_id" to userId,
             "meal_type" to request.mealType,
             "foods" to request.foods,
@@ -39,6 +45,7 @@ class MealService(
             "carbs" to nutrition.carbs,
             "fat" to nutrition.fat
         )
+        imageUrl?.let { body["image_url"] = it }
 
         val rows = supabaseClient.post(
             "meals", body,
@@ -95,7 +102,7 @@ class MealService(
     }
 
     fun update(userId: String, id: String, request: UpdateMealRequest): MealResponse {
-        log.info("Atualizando refeição: userId={}, id={}", userId, id)
+        log.info("Atualizando refeição: userId={}, id={}, hasImage={}", userId, id, request.image != null)
 
         val body = mutableMapOf<String, Any>()
         request.foods?.let { body["foods"] = it }
@@ -108,6 +115,10 @@ class MealService(
             body["carbs"] = it.carbs
             body["fat"] = it.fat
         }
+
+        // Upload new image if provided
+        val imageUrl = uploadImage(request.image, "meal")
+        imageUrl?.let { body["image_url"] = it }
 
         val rows = supabaseClient.patch(
             "meals",
@@ -133,7 +144,7 @@ class MealService(
             object : ParameterizedTypeReference<List<SupabaseMealRow>>() {}
         )!!.first()
 
-        val body = mapOf(
+        val body = mutableMapOf<String, Any>(
             "user_id" to userId,
             "meal_type" to original.mealType,
             "foods" to original.foods,
@@ -144,6 +155,7 @@ class MealService(
             "carbs" to (original.carbs ?: ""),
             "fat" to (original.fat ?: "")
         )
+        original.imageUrl?.let { body["image_url"] = it }
 
         val rows = supabaseClient.post(
             "meals", body,
@@ -151,6 +163,17 @@ class MealService(
         )
 
         return MealResponse.from(rows!!.first())
+    }
+
+    private fun uploadImage(base64: String?, prefix: String): String? {
+        return base64?.takeIf { it.isNotBlank() }?.let {
+            try {
+                storageClient.uploadBase64Image(it, prefix, mealImagesBucket)
+            } catch (e: Exception) {
+                log.error("Erro ao fazer upload da imagem de refeição: {}", e.message)
+                null
+            }
+        }
     }
 
     private fun sumNutrition(meals: List<MealResponse>): NutritionData {
