@@ -17,8 +17,8 @@ class FavoriteService(
 
     private val log = LoggerFactory.getLogger(FavoriteService::class.java)
 
-    fun create(request: CreateFavoriteRequest): FavoriteResponse {
-        log.info("Criando favorito: {}", request.foods)
+    fun create(userId: String, request: CreateFavoriteRequest): FavoriteResponse {
+        log.info("Criando favorito: userId={}, foods={}", userId, request.foods)
 
         // Upload image if provided
         val imageUrl = request.image?.takeIf { it.isNotBlank() }?.let { base64 ->
@@ -31,6 +31,7 @@ class FavoriteService(
         }
 
         val body = mutableMapOf<String, Any>(
+            "user_id" to userId,
             "foods" to request.foods,
             "calories" to (request.nutrition?.calories ?: ""),
             "protein" to (request.nutrition?.protein ?: ""),
@@ -47,20 +48,23 @@ class FavoriteService(
         return FavoriteResponse.from(rows!!.first())
     }
 
-    fun getAll(): List<FavoriteResponse> {
-        log.info("Buscando favoritos")
+    fun getAll(userId: String): List<FavoriteResponse> {
+        log.info("Buscando favoritos: userId={}", userId)
 
         val rows = supabaseClient.get(
             "favorite_meals",
-            mapOf("order" to "created_at.desc"),
+            mapOf(
+                "user_id" to "eq.$userId",
+                "order" to "created_at.desc"
+            ),
             object : ParameterizedTypeReference<List<SupabaseFavoriteRow>>() {}
         ) ?: emptyList()
 
         return rows.map { FavoriteResponse.from(it) }
     }
 
-    fun delete(id: String) {
-        log.info("Deletando favorito: {}", id)
-        supabaseClient.delete("favorite_meals", mapOf("id" to "eq.$id"))
+    fun delete(userId: String, id: String) {
+        log.info("Deletando favorito: userId={}, id={}", userId, id)
+        supabaseClient.delete("favorite_meals", mapOf("id" to "eq.$id", "user_id" to "eq.$userId"))
     }
 }

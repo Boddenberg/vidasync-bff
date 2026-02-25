@@ -14,11 +14,11 @@ class FavoriteController(private val favoriteService: FavoriteService) {
     private val log = LoggerFactory.getLogger(FavoriteController::class.java)
 
     @PostMapping
-    fun create(@RequestBody request: CreateFavoriteRequest): ResponseEntity<Any> {
-        log.info("POST /favorites | foods={}, hasNutrition={}, hasImage={}",
-            request.foods, request.nutrition != null, request.image != null)
+    fun create(@RequestHeader("X-User-Id") userId: String, @RequestBody body: CreateFavoriteRequest): ResponseEntity<Any> {
+        log.info("POST /favorites | userId={}, foods={}, hasNutrition={}, hasImage={}",
+            userId, body.foods, body.nutrition != null, body.image != null)
         return try {
-            val result = favoriteService.create(request)
+            val result = favoriteService.create(userId, body)
             log.info("POST /favorites → 201 | id={}, imageUrl={}", result.id, result.imageUrl)
             ResponseEntity.status(HttpStatus.CREATED).body(mapOf("favorite" to result))
         } catch (e: Exception) {
@@ -28,10 +28,10 @@ class FavoriteController(private val favoriteService: FavoriteService) {
     }
 
     @GetMapping
-    fun getAll(): ResponseEntity<Any> {
-        log.info("GET /favorites")
+    fun getAll(@RequestHeader("X-User-Id") userId: String): ResponseEntity<Any> {
+        log.info("GET /favorites | userId={}", userId)
         return try {
-            val result = favoriteService.getAll()
+            val result = favoriteService.getAll(userId)
             log.info("GET /favorites → 200 | count={}", result.size)
             ResponseEntity.ok(mapOf("favorites" to result))
         } catch (e: Exception) {
@@ -41,10 +41,10 @@ class FavoriteController(private val favoriteService: FavoriteService) {
     }
 
     @DeleteMapping("/{id}")
-    fun delete(@PathVariable id: String): ResponseEntity<Any> {
-        log.info("DELETE /favorites/{}", id)
+    fun delete(@RequestHeader("X-User-Id") userId: String, @PathVariable id: String): ResponseEntity<Any> {
+        log.info("DELETE /favorites/{} | userId={}", id, userId)
         return try {
-            favoriteService.delete(id)
+            favoriteService.delete(userId, id)
             log.info("DELETE /favorites/{} → 200 | deleted", id)
             ResponseEntity.ok(mapOf("success" to true))
         } catch (e: Exception) {

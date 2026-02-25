@@ -22,13 +22,14 @@ class MealService(
     private val log = LoggerFactory.getLogger(MealService::class.java)
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-    fun create(request: CreateMealRequest): MealResponse {
-        log.info("Criando refeição: {} - {}", request.mealType, request.foods)
+    fun create(userId: String, request: CreateMealRequest): MealResponse {
+        log.info("Criando refeição: userId={}, {} - {}", userId, request.mealType, request.foods)
 
         val nutrition = request.nutrition ?: nutritionService.calculateNutrition(request.foods)
         val time = request.time ?: LocalTime.now().format(timeFormatter)
 
         val body = mapOf(
+            "user_id" to userId,
             "meal_type" to request.mealType,
             "foods" to request.foods,
             "date" to request.date,
@@ -47,12 +48,13 @@ class MealService(
         return MealResponse.from(rows!!.first())
     }
 
-    fun getByDate(date: String): List<MealResponse> {
-        log.info("Buscando refeições para date: {}", date)
+    fun getByDate(userId: String, date: String): List<MealResponse> {
+        log.info("Buscando refeições: userId={}, date={}", userId, date)
 
         val rows = supabaseClient.get(
             "meals",
             mapOf(
+                "user_id" to "eq.$userId",
                 "date" to "eq.$date",
                 "order" to "time.asc"
             ),
@@ -62,12 +64,13 @@ class MealService(
         return rows.map { MealResponse.from(it) }
     }
 
-    fun getByDateRange(startDate: String, endDate: String): List<MealResponse> {
-        log.info("Buscando refeições de {} a {}", startDate, endDate)
+    fun getByDateRange(userId: String, startDate: String, endDate: String): List<MealResponse> {
+        log.info("Buscando refeições: userId={}, de {} a {}", userId, startDate, endDate)
 
         val rows = supabaseClient.get(
             "meals",
             mapOf(
+                "user_id" to "eq.$userId",
                 "and" to "(date.gte.$startDate,date.lte.$endDate)",
                 "order" to "date.asc,time.asc"
             ),
@@ -77,10 +80,10 @@ class MealService(
         return rows.map { MealResponse.from(it) }
     }
 
-    fun getDaySummary(date: String): DaySummaryResponse {
-        log.info("Gerando resumo do dia: {}", date)
+    fun getDaySummary(userId: String, date: String): DaySummaryResponse {
+        log.info("Gerando resumo do dia: userId={}, date={}", userId, date)
 
-        val meals = getByDate(date)
+        val meals = getByDate(userId, date)
         val totals = sumNutrition(meals)
 
         return DaySummaryResponse(
@@ -91,8 +94,8 @@ class MealService(
         )
     }
 
-    fun update(id: String, request: UpdateMealRequest): MealResponse {
-        log.info("Atualizando refeição: {}", id)
+    fun update(userId: String, id: String, request: UpdateMealRequest): MealResponse {
+        log.info("Atualizando refeição: userId={}, id={}", userId, id)
 
         val body = mutableMapOf<String, Any>()
         request.foods?.let { body["foods"] = it }
@@ -108,7 +111,7 @@ class MealService(
 
         val rows = supabaseClient.patch(
             "meals",
-            mapOf("id" to "eq.$id"),
+            mapOf("id" to "eq.$id", "user_id" to "eq.$userId"),
             body,
             object : ParameterizedTypeReference<List<SupabaseMealRow>>() {}
         )
@@ -116,21 +119,22 @@ class MealService(
         return MealResponse.from(rows!!.first())
     }
 
-    fun delete(id: String) {
-        log.info("Deletando refeição: {}", id)
-        supabaseClient.delete("meals", mapOf("id" to "eq.$id"))
+    fun delete(userId: String, id: String) {
+        log.info("Deletando refeição: userId={}, id={}", userId, id)
+        supabaseClient.delete("meals", mapOf("id" to "eq.$id", "user_id" to "eq.$userId"))
     }
 
-    fun duplicate(id: String): MealResponse {
-        log.info("Duplicando refeição: {}", id)
+    fun duplicate(userId: String, id: String): MealResponse {
+        log.info("Duplicando refeição: userId={}, id={}", userId, id)
 
         val original = supabaseClient.get(
             "meals",
-            mapOf("id" to "eq.$id"),
+            mapOf("id" to "eq.$id", "user_id" to "eq.$userId"),
             object : ParameterizedTypeReference<List<SupabaseMealRow>>() {}
         )!!.first()
 
         val body = mapOf(
+            "user_id" to userId,
             "meal_type" to original.mealType,
             "foods" to original.foods,
             "date" to original.date,
@@ -179,4 +183,3 @@ class MealService(
         else "%.1f".format(value)
     }
 }
-

@@ -21,27 +21,34 @@ Backend For Frontend (BFF) do VidaSync — API responsável por intermediar o fr
 com.vidasync_bff/
 ├── VidasyncBffApplication.kt
 ├── client/
-│   ├── SupabaseClient.kt          # CRUD via PostgREST
+│   ├── SupabaseClient.kt          # CRUD via PostgREST (com user token)
 │   └── SupabaseStorageClient.kt    # Upload de imagens via Storage
 ├── config/
+│   ├── JwtAuthFilter.kt           # Valida JWT do Supabase Auth
 │   ├── OpenAIConfig.kt
-│   └── SupabaseConfig.kt
+│   ├── RequestLoggingFilter.kt    # Log de request/response HTTP
+│   ├── SupabaseConfig.kt
+│   └── UserContext.kt             # Extension functions p/ userId/userToken
 ├── controller/
+│   ├── AuthController.kt
 │   ├── FavoriteController.kt
 │   ├── HealthController.kt
 │   ├── MealController.kt
 │   └── NutritionController.kt
 ├── dto/
 │   ├── request/
+│   │   ├── AuthRequest.kt
 │   │   ├── CalorieRequest.kt
 │   │   ├── CreateFavoriteRequest.kt
 │   │   ├── CreateMealRequest.kt
 │   │   └── UpdateMealRequest.kt
 │   └── response/
+│       ├── AuthResponse.kt
 │       ├── CalorieResponse.kt
 │       ├── FavoriteResponse.kt
 │       └── MealResponse.kt
 └── service/
+    ├── AuthService.kt
     ├── FavoriteService.kt
     ├── MealService.kt
     └── NutritionService.kt
@@ -56,6 +63,7 @@ com.vidasync_bff/
 | `OPENAI_API_KEY` | Chave da API da OpenAI | — |
 | `SUPABASE_URL` | URL do projeto Supabase | — |
 | `SUPABASE_ANON_KEY` | Chave anônima do Supabase | — |
+| `SUPABASE_JWT_SECRET` | JWT Secret (Supabase → Settings → API) | — |
 | `SUPABASE_STORAGE_BUCKET` | Nome do bucket para imagens | `favorite-images` |
 | `PORT` | Porta do servidor | `8080` |
 
@@ -67,6 +75,60 @@ com.vidasync_bff/
 
 ```
 GET /health → { "status": "UP" }
+```
+
+---
+
+### 🔐 Autenticação
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/auth/signup` | Criar conta (email + senha) |
+| `POST` | `/auth/login` | Login (retorna token JWT) |
+
+#### POST /auth/signup
+
+```json
+// Request
+{ "email": "user@email.com", "password": "minhasenha123" }
+
+// Response (201)
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "abc123...",
+  "expiresIn": 3600,
+  "user": { "id": "uuid", "email": "user@email.com" }
+}
+```
+
+#### POST /auth/login
+
+```json
+// Request
+{ "email": "user@email.com", "password": "minhasenha123" }
+
+// Response (200)
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "abc123...",
+  "expiresIn": 3600,
+  "user": { "id": "uuid", "email": "user@email.com" }
+}
+```
+
+> O `accessToken` retornado deve ser enviado em todas as requests protegidas:
+> `Authorization: Bearer <accessToken>`
+
+#### Endpoints públicos (sem token):
+- `GET /health`
+- `POST /nutrition/calories`
+- `POST /auth/signup`
+- `POST /auth/login`
+
+#### Resposta quando falta/inválido:
+```json
+{ "error": "Token de autenticação não fornecido" }
+{ "error": "Token inválido: ..." }
 ```
 
 ---
@@ -278,6 +340,7 @@ Todos os campos são **opcionais** (update parcial):
 ```sql
 CREATE TABLE meals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id),
     meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast','lunch','snack','dinner','supper')),
     foods TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -291,6 +354,7 @@ CREATE TABLE meals (
 
 CREATE TABLE favorite_meals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id),
     foods TEXT NOT NULL,
     calories TEXT,
     protein TEXT,
@@ -300,11 +364,21 @@ CREATE TABLE favorite_meals (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE INDEX idx_meals_user_id ON meals(user_id);
+CREATE INDEX idx_favorite_meals_user_id ON favorite_meals(user_id);
+
 ALTER TABLE meals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE favorite_meals ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow all for anon" ON meals FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all for anon" ON favorite_meals FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Users can select own meals" ON meals FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own meals" ON meals FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own meals" ON meals FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own meals" ON meals FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can select own favorites" ON favorite_meals FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own favorites" ON favorite_meals FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own favorites" ON favorite_meals FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own favorites" ON favorite_meals FOR DELETE USING (auth.uid() = user_id);
 ```
 
 ### Supabase Storage
@@ -318,17 +392,32 @@ CREATE POLICY "Allow all for anon" ON favorite_meals FOR ALL USING (true) WITH C
 
 ## 🔄 Fluxo esperado
 
-1. Usuário digita o que comeu → app chama `POST /nutrition/calories`
-2. App mostra resultado → usuário escolhe o tipo de refeição
-3. App chama `POST /meals` com `foods` + `mealType` + `date` + `time` (opcional) + `nutrition` (opcional)
-4. Timeline do dia: `GET /meals/summary?date=...` retorna refeições ordenadas por horário + totais
-5. Calendário: `GET /meals/range?startDate=...&endDate=...` retorna refeições do período
-6. Editar/apagar/duplicar são operações sobre o `id` do meal
-7. Favoritar: `POST /favorites` com `foods` + `nutrition` + `image` (base64 opcional)
+1. Usuário cria conta → `POST /auth/signup`
+2. Usuário faz login → `POST /auth/login` → recebe `accessToken`
+3. Todas as requests seguintes enviam `Authorization: Bearer <accessToken>`
+4. Usuário digita o que comeu → app chama `POST /nutrition/calories`
+5. App mostra resultado → usuário escolhe o tipo de refeição
+6. App chama `POST /meals` com `foods` + `mealType` + `date` + `time` + `nutrition`
+7. Timeline do dia: `GET /meals/summary?date=...`
+8. Calendário: `GET /meals/range?startDate=...&endDate=...`
+9. Editar/apagar/duplicar são operações sobre o `id` do meal
+10. Favoritar: `POST /favorites` com `foods` + `nutrition` + `image` (base64 opcional)
 
 ---
 
 ## 📋 Changelog
+
+### v0.4.0 — Autenticação (2026-02-24)
+- Novos endpoints `POST /auth/signup` e `POST /auth/login` (email + senha via Supabase Auth)
+- `JwtAuthFilter` valida JWT em todas as rotas protegidas
+- Token do usuário forwarded ao Supabase PostgREST → RLS ativo no banco
+- `user_id` incluído em todos os INSERTs e filtros de queries
+- Cada usuário só vê/edita/deleta seus próprios dados
+- Endpoints públicos: `/health`, `/nutrition/calories`, `/auth/*`
+- Nova coluna `user_id UUID` em `meals` e `favorite_meals`
+- RLS policies por usuário (SELECT/INSERT/UPDATE/DELETE)
+- Dependência: `com.auth0:java-jwt:4.4.0`
+- Nova variável: `SUPABASE_JWT_SECRET`
 
 ### v0.3.0 — Imagens nos Favoritos (2026-02-24)
 - `POST /favorites` aceita campo `image` (base64) — upload automático para Supabase Storage
@@ -363,6 +452,7 @@ CREATE POLICY "Allow all for anon" ON favorite_meals FOR ALL USING (true) WITH C
 OPENAI_API_KEY=sua_chave
 SUPABASE_URL=sua_url
 SUPABASE_ANON_KEY=sua_chave_anon
+SUPABASE_JWT_SECRET=seu_jwt_secret
 ```
 
 2. Rode:
@@ -380,5 +470,6 @@ docker run -p 8080:8080 \
   -e OPENAI_API_KEY=sua_chave \
   -e SUPABASE_URL=sua_url \
   -e SUPABASE_ANON_KEY=sua_chave_anon \
+  -e SUPABASE_JWT_SECRET=seu_jwt_secret \
   vidasync-bff
 ```
