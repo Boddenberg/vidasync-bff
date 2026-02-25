@@ -20,10 +20,27 @@ class NutritionController(private val nutritionService: NutritionService) {
     fun calculateCalories(@RequestBody request: CalorieRequest): ResponseEntity<CalorieResponse> {
         log.info("POST /nutrition/calories | foods={}", request.foods)
         return try {
-            val nutrition = nutritionService.calculateNutrition(request.foods)
-            log.info("POST /nutrition/calories → 200 | calories={}, protein={}, carbs={}, fat={}",
-                nutrition.calories, nutrition.protein, nutrition.carbs, nutrition.fat)
-            ResponseEntity.ok(CalorieResponse(nutrition = nutrition))
+            val result = nutritionService.calculateNutritionSmart(request.foods)
+
+            // Todos os itens são inválidos → 400
+            if (result.nutrition == null && !result.invalidItems.isNullOrEmpty()) {
+                val msg = if (result.invalidItems.size == 1)
+                    "\"${result.invalidItems.first()}\" não é um alimento válido."
+                else
+                    "${result.invalidItems.joinToString(", ") { "\"$it\"" }} não são alimentos válidos."
+                log.warn("POST /nutrition/calories → 400 | invalidItems={}", result.invalidItems)
+                return ResponseEntity.badRequest().body(CalorieResponse(error = msg, invalidItems = result.invalidItems))
+            }
+
+            // Erro genérico (sem nutrition e sem invalidItems)
+            if (result.nutrition == null && result.error != null) {
+                log.warn("POST /nutrition/calories → 400 | error={}", result.error)
+                return ResponseEntity.badRequest().body(result)
+            }
+
+            log.info("POST /nutrition/calories → 200 | calories={}, ingredients={}, corrections={}, invalidItems={}",
+                result.nutrition?.calories, result.ingredients?.size, result.corrections?.size, result.invalidItems?.size)
+            ResponseEntity.ok(result)
         } catch (e: Exception) {
             log.error("POST /nutrition/calories → 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(CalorieResponse(error = e.message))

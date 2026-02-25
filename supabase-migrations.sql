@@ -36,3 +36,21 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_username ON user_profiles(username)
 ALTER TABLE meals DISABLE ROW LEVEL SECURITY;
 ALTER TABLE favorite_meals DISABLE ROW LEVEL SECURITY;
 ALTER TABLE user_profiles DISABLE ROW LEVEL SECURITY;
+
+-- 7. Tabela de cache de ingredientes (nutrição por ingrediente individual)
+CREATE TABLE IF NOT EXISTS ingredient_cache (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ingredient_key TEXT UNIQUE NOT NULL,
+    original_input TEXT NOT NULL,
+    corrected_input TEXT,
+    calories TEXT NOT NULL DEFAULT '0 kcal',
+    protein TEXT NOT NULL DEFAULT '0g',
+    carbs TEXT NOT NULL DEFAULT '0g',
+    fat TEXT NOT NULL DEFAULT '0g',
+    is_valid_food BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingredient_cache_key ON ingredient_cache(ingredient_key);
+ALTER TABLE ingredient_cache DISABLE ROW LEVEL SECURITY;
+
