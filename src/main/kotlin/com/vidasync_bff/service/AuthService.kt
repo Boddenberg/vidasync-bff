@@ -87,7 +87,28 @@ class AuthService(
             log.error("AUTH SIGNUP → FAILED | status={}, body={}", e.statusCode, body)
             val msg = parseSupabaseError(body)
             if (msg.contains("already been registered", ignoreCase = true)) {
-                throw RuntimeException("Usuário '${request.username}' já existe")
+                // User exists in Auth but maybe profile is missing — try to recover
+                log.info("AUTH SIGNUP | user exists in Auth, checking if profile exists...")
+                try {
+                    val loginResult = login(request)
+                    // If login works, profile was auto-healed by ensureProfileExists
+                    log.info("AUTH SIGNUP | recovered via login, userId={}", loginResult.userId)
+
+                    // Upload profile image if provided and not already set
+                    if (request.profileImage != null && loginResult.profileImageUrl == null) {
+                        try {
+                            val imageUrl = storageClient.uploadBase64Image(request.profileImage, "profile_${loginResult.username}")
+                            updateProfileField(loginResult.userId, mapOf("profile_image_url" to imageUrl))
+                            return loginResult.copy(profileImageUrl = imageUrl)
+                        } catch (imgEx: Exception) {
+                            log.error("AUTH SIGNUP | failed to upload image on recovery: {}", imgEx.message)
+                        }
+                    }
+                    return loginResult
+                } catch (loginEx: Exception) {
+                    log.error("AUTH SIGNUP | recovery login also failed: {}", loginEx.message)
+                    throw RuntimeException("Usuário '${request.username}' já existe")
+                }
             }
             throw RuntimeException(msg)
         }
@@ -112,6 +133,9 @@ class AuthService(
 
             val userId = user.id ?: ""
             val username = toUsername(user.email ?: "")
+
+            // Auto-heal: recreate profile if missing
+            ensureProfileExists(userId, username)
 
             // Fetch profile to get image URL
             val profileImageUrl = getProfileImageUrl(userId)
@@ -216,6 +240,22 @@ class AuthService(
 
         // Return updated profile
         return getProfile(userId)
+    }
+
+    private fun ensureProfileExists(userId: String, username: String) {
+        try {
+            val rows = supabaseClient.get(
+                "user_profiles",
+                mapOf("user_id" to "eq.$userId"),
+                object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
+            )
+            if (rows.isNullOrEmpty()) {
+                log.info("AUTH | user_profiles missing for userId={}, auto-creating", userId)
+                saveProfile(userId, username, null)
+            }
+        } catch (e: Exception) {
+            log.error("AUTH | ensureProfileExists failed: {}", e.message)
+        }
     }
 
     private fun updateProfileField(userId: String, fields: Map<String, Any>) {
