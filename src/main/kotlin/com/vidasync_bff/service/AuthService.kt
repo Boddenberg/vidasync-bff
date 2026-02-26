@@ -18,6 +18,7 @@ import org.springframework.web.client.RestClientResponseException
 class AuthService(
     @Value("\${supabase.url:}") private val supabaseUrl: String,
     @Value("\${supabase.anon-key:}") private val supabaseAnonKey: String,
+    @Value("\${supabase.service-role-key:}") private val supabaseServiceRoleKey: String,
     private val supabaseClient: SupabaseClient,
     private val storageClient: SupabaseStorageClient
 ) {
@@ -35,6 +36,22 @@ class AuthService(
         RestClient.builder()
             .baseUrl("$normalized/auth/v1")
             .defaultHeader("apikey", supabaseAnonKey)
+            .defaultHeader("Content-Type", "application/json")
+            .build()
+    }
+
+    private val adminAuthClient: RestClient by lazy {
+        var normalized = supabaseUrl.trim()
+        while (normalized.endsWith("/")) normalized = normalized.dropLast(1)
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+            normalized = "https://$normalized"
+        }
+
+        val key = supabaseServiceRoleKey.ifBlank { supabaseAnonKey }
+        RestClient.builder()
+            .baseUrl("$normalized/auth/v1")
+            .defaultHeader("apikey", key)
+            .defaultHeader("Authorization", "Bearer $key")
             .defaultHeader("Content-Type", "application/json")
             .build()
     }
@@ -180,26 +197,21 @@ class AuthService(
         // 1. Update username
         request.username?.let { newUsername ->
             validateUsername(newUsername)
+            val newEmail = toEmail(newUsername)
 
-            if (userAccessToken != null) {
-                // Update email in Supabase Auth via user's own token
-                val newEmail = toEmail(newUsername)
-                try {
-                    log.info("AUTH UPDATE | changing email to {} via /auth/v1/user", newEmail)
-                    authClient.put()
-                        .uri("/user")
-                        .header("Authorization", "Bearer $userAccessToken")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(mapOf("email" to newEmail))
-                        .retrieve()
-                        .toBodilessEntity()
-                    log.info("AUTH UPDATE | email changed to {}", newEmail)
-                } catch (e: RestClientResponseException) {
-                    log.error("AUTH UPDATE | failed to change email: status={}, body={}", e.statusCode, e.responseBodyAsString)
-                    // Continue anyway — at least update user_profiles
-                }
-            } else {
-                log.warn("AUTH UPDATE | no access token, skipping Auth email change")
+            // Update email in Supabase Auth via Admin API (bypasses email confirmation)
+            try {
+                log.info("AUTH UPDATE | changing email to {} via admin API", newEmail)
+                adminAuthClient.put()
+                    .uri("/admin/users/$userId")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(mapOf("email" to newEmail, "email_confirm" to true))
+                    .retrieve()
+                    .toBodilessEntity()
+                log.info("AUTH UPDATE | email changed to {} in Supabase Auth", newEmail)
+            } catch (e: RestClientResponseException) {
+                log.error("AUTH UPDATE | failed to change email in Auth: status={}, body={}", e.statusCode, e.responseBodyAsString)
+                throw RuntimeException("Erro ao alterar username: ${parseSupabaseError(e.responseBodyAsString)}")
             }
 
             // Update username in user_profiles
@@ -211,24 +223,19 @@ class AuthService(
         request.password?.let { newPassword ->
             if (newPassword.length < 6) throw RuntimeException("Senha precisa ter pelo menos 6 caracteres")
 
-            if (userAccessToken != null) {
-                try {
-                    log.info("AUTH UPDATE | changing password via /auth/v1/user")
-                    authClient.put()
-                        .uri("/user")
-                        .header("Authorization", "Bearer $userAccessToken")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(mapOf("password" to newPassword))
-                        .retrieve()
-                        .toBodilessEntity()
-                    log.info("AUTH UPDATE | password changed for userId={}", userId)
-                } catch (e: RestClientResponseException) {
-                    log.error("AUTH UPDATE | failed to change password: status={}, body={}", e.statusCode, e.responseBodyAsString)
-                    throw RuntimeException("Erro ao alterar senha: ${parseSupabaseError(e.responseBodyAsString)}")
-                }
-            } else {
-                log.error("AUTH UPDATE | cannot change password without access token")
-                throw RuntimeException("Token de acesso necessário para alterar senha")
+            // Update password via Admin API (more reliable, no token issues)
+            try {
+                log.info("AUTH UPDATE | changing password via admin API for userId={}", userId)
+                adminAuthClient.put()
+                    .uri("/admin/users/$userId")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(mapOf("password" to newPassword))
+                    .retrieve()
+                    .toBodilessEntity()
+                log.info("AUTH UPDATE | password changed for userId={}", userId)
+            } catch (e: RestClientResponseException) {
+                log.error("AUTH UPDATE | failed to change password: status={}, body={}", e.statusCode, e.responseBodyAsString)
+                throw RuntimeException("Erro ao alterar senha: ${parseSupabaseError(e.responseBodyAsString)}")
             }
         }
 
