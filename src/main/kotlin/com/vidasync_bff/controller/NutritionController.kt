@@ -22,12 +22,12 @@ class NutritionController(private val nutritionService: NutritionService) {
         return try {
             val result = nutritionService.calculateNutritionSmart(request.foods)
 
-            // Todos os itens são inválidos → 400
+            // Algum item inválido → 400
             if (result.nutrition == null && !result.invalidItems.isNullOrEmpty()) {
-                val msg = if (result.invalidItems.size == 1)
-                    "\"${result.invalidItems.first()}\" não é um alimento válido."
-                else
-                    "${result.invalidItems.joinToString(", ") { "\"$it\"" }} não são alimentos válidos."
+                val msg = when (result.invalidItems.size) {
+                    1 -> "\"${result.invalidItems.first()}\" não é um alimento válido. Corrija e tente novamente."
+                    else -> "Não foi possível calcular. Revise os ingredientes: ${result.invalidItems.joinToString(", ") { "\"$it\"" }}."
+                }
                 log.warn("POST /nutrition/calories → 400 | invalidItems={}", result.invalidItems)
                 return ResponseEntity.badRequest().body(CalorieResponse(error = msg, invalidItems = result.invalidItems))
             }
