@@ -5,153 +5,103 @@ import com.vidasync_bff.client.SupabaseStorageClient
 import com.vidasync_bff.dto.request.AuthRequest
 import com.vidasync_bff.dto.request.UpdateProfileRequest
 import com.vidasync_bff.dto.response.AuthResponse
-import com.vidasync_bff.dto.response.SupabaseAuthResponse
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.ParameterizedTypeReference
-import org.springframework.http.MediaType
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.stereotype.Service
-import org.springframework.web.client.RestClient
-import org.springframework.web.client.RestClientResponseException
+import java.util.UUID
 
 @Service
 class AuthService(
-    @Value("\${supabase.url:}") private val supabaseUrl: String,
-    @Value("\${supabase.anon-key:}") private val supabaseAnonKey: String,
     private val supabaseClient: SupabaseClient,
     private val storageClient: SupabaseStorageClient
 ) {
 
     private val log = LoggerFactory.getLogger(AuthService::class.java)
     private val usernameRegex = Regex("^[a-zA-Z0-9]+$")
-
-    private val authClient: RestClient by lazy {
-        var normalized = supabaseUrl.trim()
-        while (normalized.endsWith("/")) normalized = normalized.dropLast(1)
-        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
-            normalized = "https://$normalized"
-        }
-
-        RestClient.builder()
-            .baseUrl("$normalized/auth/v1")
-            .defaultHeader("apikey", supabaseAnonKey)
-            .defaultHeader("Content-Type", "application/json")
-            .build()
-    }
-
-
-    private fun toEmail(username: String): String = "${username.lowercase()}@vidasync.app"
-    private fun toUsername(email: String): String = email.substringBefore("@")
+    private val passwordEncoder = BCryptPasswordEncoder()
 
     fun signup(request: AuthRequest): AuthResponse {
         log.info("AUTH SIGNUP | username={}, hasImage={}", request.username, request.profileImage != null)
 
         validateUsername(request.username)
+        if (request.password.length < 6) throw RuntimeException("Senha precisa ter pelo menos 6 caracteres")
 
-        val email = toEmail(request.username)
+        // Check if username already exists
+        val existing = supabaseClient.get(
+            "user_profiles",
+            mapOf("username" to "eq.${request.username.lowercase()}"),
+            object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
+        )
+        if (!existing.isNullOrEmpty()) {
+            throw RuntimeException("Usuário '${request.username}' já existe")
+        }
+
+        val userId = UUID.randomUUID().toString()
+        val username = request.username.lowercase()
+        val passwordHash = passwordEncoder.encode(request.password)
+
+        // Upload profile image if provided
+        var profileImageUrl: String? = null
+        request.profileImage?.takeIf { it.isNotBlank() }?.let { base64 ->
+            try {
+                profileImageUrl = storageClient.uploadBase64Image(base64, "profile_$username")
+                log.info("AUTH SIGNUP | profile image uploaded: {}", profileImageUrl)
+            } catch (e: Exception) {
+                log.error("AUTH SIGNUP | failed to upload profile image: {}", e.message)
+            }
+        }
+
+        // Save to user_profiles
+        val body = mutableMapOf<String, Any>(
+            "user_id" to userId,
+            "username" to username,
+            "password_hash" to passwordHash
+        )
+        profileImageUrl?.let { body["profile_image_url"] = it }
 
         try {
-            val supabaseResponse = authClient.post()
-                .uri("/signup")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(mapOf("email" to email, "password" to request.password))
-                .retrieve()
-                .body(SupabaseAuthResponse::class.java)
-                ?: throw RuntimeException("Resposta vazia do Supabase Auth")
-
-            val user = supabaseResponse.user
-                ?: throw RuntimeException("Usuário não retornado pelo Supabase")
-
-            val userId = user.id ?: ""
-            val username = toUsername(user.email ?: "")
-            val accessToken = supabaseResponse.accessToken
-
-            // Upload profile image if provided
-            var profileImageUrl: String? = null
-            request.profileImage?.takeIf { it.isNotBlank() }?.let { base64 ->
-                try {
-                    profileImageUrl = storageClient.uploadBase64Image(base64, "profile_$username")
-                    log.info("AUTH SIGNUP | profile image uploaded: {}", profileImageUrl)
-                } catch (e: Exception) {
-                    log.error("AUTH SIGNUP | failed to upload profile image: {}", e.message)
-                }
-            }
-
-            // Save profile to user_profiles table
-            saveProfile(userId, username, profileImageUrl)
-
-            val result = AuthResponse(userId = userId, username = username, profileImageUrl = profileImageUrl, accessToken = accessToken)
-            log.info("AUTH SIGNUP → OK | userId={}, username={}, hasToken={}", result.userId, result.username, accessToken != null)
-            return result
-
-        } catch (e: RestClientResponseException) {
-            val body = e.responseBodyAsString
-            log.error("AUTH SIGNUP → FAILED | status={}, body={}", e.statusCode, body)
-            val msg = parseSupabaseError(body)
-            if (msg.contains("already been registered", ignoreCase = true)) {
-                // User exists in Auth but maybe profile is missing — try to recover
-                log.info("AUTH SIGNUP | user exists in Auth, checking if profile exists...")
-                try {
-                    val loginResult = login(request)
-                    // If login works, profile was auto-healed by ensureProfileExists
-                    log.info("AUTH SIGNUP | recovered via login, userId={}", loginResult.userId)
-
-                    // Upload profile image if provided and not already set
-                    if (request.profileImage != null && loginResult.profileImageUrl == null) {
-                        try {
-                            val imageUrl = storageClient.uploadBase64Image(request.profileImage, "profile_${loginResult.username}")
-                            updateProfileField(loginResult.userId, mapOf("profile_image_url" to imageUrl))
-                            return loginResult.copy(profileImageUrl = imageUrl)
-                        } catch (imgEx: Exception) {
-                            log.error("AUTH SIGNUP | failed to upload image on recovery: {}", imgEx.message)
-                        }
-                    }
-                    return loginResult
-                } catch (loginEx: Exception) {
-                    log.error("AUTH SIGNUP | recovery login also failed: {}", loginEx.message)
-                    throw RuntimeException("Usuário '${request.username}' já existe")
-                }
-            }
-            throw RuntimeException(msg)
+            supabaseClient.post(
+                "user_profiles", body,
+                object : ParameterizedTypeReference<List<Map<String, Any>>>() {}
+            )
+        } catch (e: Exception) {
+            log.error("AUTH SIGNUP | failed to save profile: {}", e.message)
+            throw RuntimeException("Erro ao criar conta")
         }
+
+        val result = AuthResponse(userId = userId, username = username, profileImageUrl = profileImageUrl)
+        log.info("AUTH SIGNUP → OK | userId={}, username={}", result.userId, result.username)
+        return result
     }
 
     fun login(request: AuthRequest): AuthResponse {
         log.info("AUTH LOGIN | username={}", request.username)
 
-        val email = toEmail(request.username)
+        val username = request.username.lowercase()
 
-        try {
-            val supabaseResponse = authClient.post()
-                .uri("/token?grant_type=password")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(mapOf("email" to email, "password" to request.password))
-                .retrieve()
-                .body(SupabaseAuthResponse::class.java)
-                ?: throw RuntimeException("Resposta vazia do Supabase Auth")
+        val rows = supabaseClient.get(
+            "user_profiles",
+            mapOf("username" to "eq.$username"),
+            object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
+        )
 
-            val user = supabaseResponse.user
-                ?: throw RuntimeException("Usuário não retornado pelo Supabase")
+        val profile = rows?.firstOrNull()
+            ?: throw RuntimeException("Usuário ou senha inválidos")
 
-            val userId = user.id ?: ""
-            val username = toUsername(user.email ?: "")
-            val accessToken = supabaseResponse.accessToken
+        val storedHash = profile["password_hash"] as? String
+            ?: throw RuntimeException("Usuário ou senha inválidos")
 
-            // Auto-heal: recreate profile if missing
-            ensureProfileExists(userId, username)
-
-            // Fetch profile to get image URL
-            val profileImageUrl = getProfileImageUrl(userId)
-
-            val result = AuthResponse(userId = userId, username = username, profileImageUrl = profileImageUrl, accessToken = accessToken)
-            log.info("AUTH LOGIN → OK | userId={}, username={}, hasToken={}", result.userId, result.username, accessToken != null)
-            return result
-
-        } catch (e: RestClientResponseException) {
-            val body = e.responseBodyAsString
-            log.error("AUTH LOGIN → FAILED | status={}, body={}", e.statusCode, body)
+        if (!passwordEncoder.matches(request.password, storedHash)) {
             throw RuntimeException("Usuário ou senha inválidos")
         }
+
+        val userId = profile["user_id"] as? String ?: ""
+        val profileImageUrl = profile["profile_image_url"] as? String
+
+        val result = AuthResponse(userId = userId, username = username, profileImageUrl = profileImageUrl)
+        log.info("AUTH LOGIN → OK | userId={}, username={}", result.userId, result.username)
+        return result
     }
 
     fun getProfile(userId: String): AuthResponse {
@@ -173,40 +123,35 @@ class AuthService(
         )
     }
 
-    fun updateProfile(userId: String, userAccessToken: String?, request: UpdateProfileRequest): AuthResponse {
-        log.info("AUTH UPDATE PROFILE | userId={}, hasUsername={}, hasPassword={}, hasImage={}, hasToken={}",
-            userId, request.username != null, request.password != null, request.profileImage != null, userAccessToken != null)
+    fun updateProfile(userId: String, request: UpdateProfileRequest): AuthResponse {
+        log.info("AUTH UPDATE PROFILE | userId={}, hasUsername={}, hasPassword={}, hasImage={}",
+            userId, request.username != null, request.password != null, request.profileImage != null)
 
-        // 1. Update username (only in user_profiles — login stays with original username)
+        // 1. Update username
         request.username?.let { newUsername ->
             validateUsername(newUsername)
-            updateProfileField(userId, mapOf("username" to newUsername))
-            log.info("AUTH UPDATE | username updated to {} in user_profiles", newUsername)
+            val lowered = newUsername.lowercase()
+
+            // Check if new username is taken by someone else
+            val existing = supabaseClient.get(
+                "user_profiles",
+                mapOf("username" to "eq.$lowered", "user_id" to "neq.$userId"),
+                object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
+            )
+            if (!existing.isNullOrEmpty()) {
+                throw RuntimeException("Username '$newUsername' já está em uso")
+            }
+
+            updateProfileField(userId, mapOf("username" to lowered))
+            log.info("AUTH UPDATE | username updated to {}", lowered)
         }
 
-        // 2. Update password via user's own token
+        // 2. Update password
         request.password?.let { newPassword ->
             if (newPassword.length < 6) throw RuntimeException("Senha precisa ter pelo menos 6 caracteres")
-
-            if (userAccessToken.isNullOrBlank()) {
-                throw RuntimeException("Token de acesso necessário para alterar senha. Faça login novamente.")
-            }
-
-            try {
-                log.info("AUTH UPDATE | changing password via /auth/v1/user for userId={}", userId)
-                val response = authClient.put()
-                    .uri("/user")
-                    .header("Authorization", "Bearer $userAccessToken")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(mapOf("password" to newPassword))
-                    .retrieve()
-                    .body(String::class.java)
-                log.info("AUTH UPDATE | password changed OK | response={}", response?.take(200))
-            } catch (e: RestClientResponseException) {
-                log.error("AUTH UPDATE | failed to change password | status={}, body={}", e.statusCode, e.responseBodyAsString)
-                val detail = parseSupabaseError(e.responseBodyAsString)
-                throw RuntimeException("Erro ao alterar senha: $detail")
-            }
+            val newHash = passwordEncoder.encode(newPassword)
+            updateProfileField(userId, mapOf("password_hash" to newHash))
+            log.info("AUTH UPDATE | password changed for userId={}", userId)
         }
 
         // 3. Update profile image
@@ -230,24 +175,7 @@ class AuthService(
             }
         }
 
-        // Return updated profile
         return getProfile(userId)
-    }
-
-    private fun ensureProfileExists(userId: String, username: String) {
-        try {
-            val rows = supabaseClient.get(
-                "user_profiles",
-                mapOf("user_id" to "eq.$userId"),
-                object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
-            )
-            if (rows.isNullOrEmpty()) {
-                log.info("AUTH | user_profiles missing for userId={}, auto-creating", userId)
-                saveProfile(userId, username, null)
-            }
-        } catch (e: Exception) {
-            log.error("AUTH | ensureProfileExists failed: {}", e.message)
-        }
     }
 
     private fun updateProfileField(userId: String, fields: Map<String, Any>) {
@@ -259,54 +187,10 @@ class AuthService(
         )
     }
 
-    private fun saveProfile(userId: String, username: String, profileImageUrl: String?) {
-        try {
-            val body = mutableMapOf<String, Any>(
-                "user_id" to userId,
-                "username" to username
-            )
-            profileImageUrl?.let { body["profile_image_url"] = it }
-
-            supabaseClient.post(
-                "user_profiles", body,
-                object : ParameterizedTypeReference<List<Map<String, Any>>>() {}
-            )
-            log.info("AUTH | profile saved for userId={}", userId)
-        } catch (e: Exception) {
-            log.error("AUTH | failed to save profile: {}", e.message)
-        }
-    }
-
-    private fun getProfileImageUrl(userId: String): String? {
-        return try {
-            val rows = supabaseClient.get(
-                "user_profiles",
-                mapOf("user_id" to "eq.$userId"),
-                object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
-            )
-            rows?.firstOrNull()?.get("profile_image_url") as? String
-        } catch (e: Exception) {
-            log.error("AUTH | failed to fetch profile: {}", e.message)
-            null
-        }
-    }
-
     private fun validateUsername(username: String) {
         if (username.isBlank()) throw RuntimeException("Username não pode ser vazio")
         if (username.length < 3) throw RuntimeException("Username precisa ter pelo menos 3 caracteres")
         if (username.length > 30) throw RuntimeException("Username pode ter no máximo 30 caracteres")
         if (!usernameRegex.matches(username)) throw RuntimeException("Username só pode conter letras e números")
-    }
-
-    private fun parseSupabaseError(body: String): String {
-        return try {
-            val node = com.fasterxml.jackson.databind.ObjectMapper().readTree(body)
-            node.get("error_description")?.asText()
-                ?: node.get("msg")?.asText()
-                ?: node.get("message")?.asText()
-                ?: "Erro de autenticação"
-        } catch (_: Exception) {
-            "Erro de autenticação"
-        }
     }
 }

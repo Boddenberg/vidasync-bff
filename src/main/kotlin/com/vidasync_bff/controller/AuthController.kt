@@ -56,13 +56,12 @@ class AuthController(private val authService: AuthService) {
     @PutMapping("/profile")
     fun updateProfile(
         @RequestHeader("X-User-Id") userId: String,
-        @RequestHeader("X-Access-Token", required = false) accessToken: String?,
         @RequestBody request: UpdateProfileRequest
     ): ResponseEntity<Any> {
-        log.info("PUT /auth/profile | userId={}, hasUsername={}, hasPassword={}, hasImage={}, hasToken={}",
-            userId, request.username != null, request.password != null, request.profileImage != null, accessToken != null)
+        log.info("PUT /auth/profile | userId={}, hasUsername={}, hasPassword={}, hasImage={}",
+            userId, request.username != null, request.password != null, request.profileImage != null)
         return try {
-            val result = authService.updateProfile(userId, accessToken, request)
+            val result = authService.updateProfile(userId, request)
             log.info("PUT /auth/profile → 200 | username={}", result.username)
             ResponseEntity.ok(result)
         } catch (e: Exception) {

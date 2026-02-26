@@ -21,6 +21,7 @@ repositories {
 
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-web")
+	implementation("org.springframework.security:spring-security-crypto")
 	implementation("org.jetbrains.kotlin:kotlin-reflect")
 	implementation("com.openai:openai-java:2.1.0")
 	implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
