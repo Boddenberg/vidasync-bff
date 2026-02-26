@@ -18,6 +18,7 @@ import org.springframework.web.client.RestClientResponseException
 class AuthService(
     @Value("\${supabase.url:}") private val supabaseUrl: String,
     @Value("\${supabase.anon-key:}") private val supabaseAnonKey: String,
+    @Value("\${supabase.service-role-key:}") private val supabaseServiceRoleKey: String,
     private val supabaseClient: SupabaseClient,
     private val storageClient: SupabaseStorageClient
 ) {
@@ -35,6 +36,26 @@ class AuthService(
         RestClient.builder()
             .baseUrl("$normalized/auth/v1")
             .defaultHeader("apikey", supabaseAnonKey)
+            .defaultHeader("Content-Type", "application/json")
+            .build()
+    }
+
+    private val adminAuthClient: RestClient by lazy {
+        var normalized = supabaseUrl.trim()
+        while (normalized.endsWith("/")) normalized = normalized.dropLast(1)
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+            normalized = "https://$normalized"
+        }
+
+        val key = supabaseServiceRoleKey.ifBlank { supabaseAnonKey }
+        if (supabaseServiceRoleKey.isBlank()) {
+            log.warn("⚠️ SUPABASE_SERVICE_ROLE_KEY não configurada. Operações admin (alterar senha/username) podem falhar.")
+        }
+
+        RestClient.builder()
+            .baseUrl("$normalized/auth/v1")
+            .defaultHeader("apikey", key)
+            .defaultHeader("Authorization", "Bearer $key")
             .defaultHeader("Content-Type", "application/json")
             .build()
     }
@@ -181,10 +202,9 @@ class AuthService(
 
             // Update email in Supabase Auth
             try {
-                authClient.put()
+                adminAuthClient.put()
                     .uri("/admin/users/$userId")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .header("Authorization", "Bearer $supabaseAnonKey")
                     .body(mapOf("email" to newEmail))
                     .retrieve()
                     .toBodilessEntity()
@@ -203,10 +223,9 @@ class AuthService(
             if (newPassword.length < 6) throw RuntimeException("Senha precisa ter pelo menos 6 caracteres")
 
             try {
-                authClient.put()
+                adminAuthClient.put()
                     .uri("/admin/users/$userId")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .header("Authorization", "Bearer $supabaseAnonKey")
                     .body(mapOf("password" to newPassword))
                     .retrieve()
                     .toBodilessEntity()
