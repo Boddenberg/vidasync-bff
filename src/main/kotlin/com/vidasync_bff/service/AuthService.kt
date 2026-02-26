@@ -64,6 +64,7 @@ class AuthService(
 
             val userId = user.id ?: ""
             val username = toUsername(user.email ?: "")
+            val accessToken = supabaseResponse.accessToken
 
             // Upload profile image if provided
             var profileImageUrl: String? = null
@@ -79,8 +80,8 @@ class AuthService(
             // Save profile to user_profiles table
             saveProfile(userId, username, profileImageUrl)
 
-            val result = AuthResponse(userId = userId, username = username, profileImageUrl = profileImageUrl)
-            log.info("AUTH SIGNUP → OK | userId={}, username={}", result.userId, result.username)
+            val result = AuthResponse(userId = userId, username = username, profileImageUrl = profileImageUrl, accessToken = accessToken)
+            log.info("AUTH SIGNUP → OK | userId={}, username={}, hasToken={}", result.userId, result.username, accessToken != null)
             return result
 
         } catch (e: RestClientResponseException) {
