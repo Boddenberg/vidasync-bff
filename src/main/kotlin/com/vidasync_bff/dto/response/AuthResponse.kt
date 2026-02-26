@@ -19,5 +19,6 @@ data class SupabaseUser(
 data class AuthResponse(
     val userId: String,
     val username: String,
-    val profileImageUrl: String? = null
+    val profileImageUrl: String? = null,
+    val accessToken: String? = null
 )

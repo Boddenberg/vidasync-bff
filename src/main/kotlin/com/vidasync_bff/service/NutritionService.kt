@@ -58,26 +58,23 @@ class NutritionService(
             }
         }
 
-        // 3. Chamar OpenAI para os misses em paralelo (batches de até 5)
+        // 3. Chamar OpenAI para cada miss em paralelo (1 ingrediente por chamada)
         val newResults = mutableListOf<IngredientCacheRow>()
         if (misses.isNotEmpty()) {
-            val batches = misses.chunked(5)
-            log.info("Chamando OpenAI para {} ingredientes em {} batch(es)", misses.size, batches.size)
+            log.info("Chamando OpenAI para {} ingredientes em paralelo", misses.size)
 
             val executor = Executors.newVirtualThreadPerTaskExecutor()
-            val futures = mutableListOf<Future<List<IngredientCacheRow>>>()
-
-            for (batch in batches) {
-                futures.add(executor.submit<List<IngredientCacheRow>> {
-                    callOpenAIForIngredients(batch)
-                })
+            val futures = misses.map { (key, original) ->
+                executor.submit<IngredientCacheRow> {
+                    callOpenAIForSingleIngredient(key, original)
+                }
             }
 
             for (future in futures) {
                 try {
-                    newResults.addAll(future.get(30, TimeUnit.SECONDS))
+                    newResults.add(future.get(30, TimeUnit.SECONDS))
                 } catch (e: Exception) {
-                    log.error("Erro ao processar batch OpenAI: {}", e.message, e)
+                    log.error("Erro ao processar ingrediente OpenAI: {}", e.message, e)
                 }
             }
             executor.shutdown()
@@ -162,69 +159,60 @@ class NutritionService(
     // OpenAI
     // ======================
 
-    private fun callOpenAIForIngredients(ingredients: List<Pair<String, String>>): List<IngredientCacheRow> {
-        val foodsList = ingredients.joinToString("\n") { (_, original) -> "- $original" }
-        log.info("OpenAI request para {} ingredientes:\n{}", ingredients.size, foodsList)
+    private fun callOpenAIForSingleIngredient(key: String, original: String): IngredientCacheRow {
+        log.info("OpenAI request: '{}'", original)
 
         val params = ChatCompletionCreateParams.builder()
             .model(ChatModel.GPT_4O_MINI)
             .addSystemMessage(SMART_SYSTEM_PROMPT)
-            .addUserMessage(foodsList)
+            .addUserMessage("- $original")
             .build()
 
         val response = openAIClient.chat().completions().create(params)
         val raw = response.choices().firstOrNull()?.message()?.content()?.orElse("[]") ?: "[]"
-        log.info("OpenAI response: {}", raw)
+        log.info("OpenAI response for '{}': {}", original, raw)
 
         return try {
             val parsed: List<OpenAIIngredientResponse> = mapper.readValue(extractJsonArray(raw))
+            val item = parsed.firstOrNull() ?: throw RuntimeException("Resposta vazia da OpenAI")
 
-            parsed.mapIndexed { index, item ->
-                val key = if (index < ingredients.size) ingredients[index].first
-                          else cacheService.normalizeKey(item.ingredient)
-                val original = if (index < ingredients.size) ingredients[index].second
-                               else item.ingredient
-
+            IngredientCacheRow(
+                ingredientKey = key,
+                originalInput = original,
+                correctedInput = item.correctedInput,
+                calories = item.calories,
+                protein = item.protein,
+                carbs = item.carbs,
+                fat = item.fat,
+                isValidFood = item.isValidFood
+            )
+        } catch (e: Exception) {
+            log.error("Erro ao parsear resposta OpenAI para '{}': {}", original, e.message, e)
+            // Fallback: método legado
+            try {
+                val fallback = calculateNutritionLegacy(original)
                 IngredientCacheRow(
                     ingredientKey = key,
                     originalInput = original,
-                    correctedInput = item.correctedInput,
-                    calories = item.calories,
-                    protein = item.protein,
-                    carbs = item.carbs,
-                    fat = item.fat,
-                    isValidFood = item.isValidFood
+                    correctedInput = original,
+                    calories = fallback.calories,
+                    protein = fallback.protein,
+                    carbs = fallback.carbs,
+                    fat = fallback.fat,
+                    isValidFood = true
                 )
-            }
-        } catch (e: Exception) {
-            log.error("Erro ao parsear resposta OpenAI: {}", e.message, e)
-            // Fallback: método legado para cada ingrediente
-            ingredients.map { (key, original) ->
-                try {
-                    val fallback = calculateNutritionLegacy(original)
-                    IngredientCacheRow(
-                        ingredientKey = key,
-                        originalInput = original,
-                        correctedInput = original,
-                        calories = fallback.calories,
-                        protein = fallback.protein,
-                        carbs = fallback.carbs,
-                        fat = fallback.fat,
-                        isValidFood = true
-                    )
-                } catch (ex: Exception) {
-                    log.error("Fallback também falhou para '{}': {}", original, ex.message)
-                    IngredientCacheRow(
-                        ingredientKey = key,
-                        originalInput = original,
-                        correctedInput = original,
-                        calories = "0 kcal",
-                        protein = "0g",
-                        carbs = "0g",
-                        fat = "0g",
-                        isValidFood = true
-                    )
-                }
+            } catch (ex: Exception) {
+                log.error("Fallback também falhou para '{}': {}", original, ex.message)
+                IngredientCacheRow(
+                    ingredientKey = key,
+                    originalInput = original,
+                    correctedInput = original,
+                    calories = "0 kcal",
+                    protein = "0g",
+                    carbs = "0g",
+                    fat = "0g",
+                    isValidFood = true
+                )
             }
         }
     }
