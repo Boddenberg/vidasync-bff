@@ -110,7 +110,7 @@
 
 ### 3. Convenção de naming (repo, package, service name, env vars)
 - **Repo**: `vidasync-bfa`
-- **Package (Kotlin)**: `com.vidasync_bfa`
+- **Package (Kotlin)**: `com.vidasync.bfa`
 - **Service name (k8s/compose)**: `vidasync-bfa`
 - **Env vars**:
   - `BFA_PORT`
@@ -167,7 +167,7 @@
 ### 1. Estrutura de diretórios do novo repositório (tree)
 ```text
 vidasync-bfa/
-  src/main/kotlin/com/vidasync_bfa/
+  src/main/kotlin/com/vidasync/bfa/
     api/
       controller/
       middleware/
@@ -438,12 +438,22 @@ vidasync-bfa/
   "correlationId": "uuid",
   "status": "ok",
   "calculation": {
-    "totals": { "calories": "610 kcal", "protein": "35g", "carbs": "77g", "fat": "12g" },
+    "totals": {
+      "calories": { "value": 610, "unit": "kcal", "display": "610 kcal" },
+      "protein": { "value": 35, "unit": "g", "display": "35g" },
+      "carbs": { "value": 77, "unit": "g", "display": "77g" },
+      "fat": { "value": 12, "unit": "g", "display": "12g" }
+    },
     "items": [
       {
         "input": "200g arroz",
         "normalized": "200g de arroz",
-        "nutrition": { "calories": "260 kcal", "protein": "5g", "carbs": "57g", "fat": "0.5g" },
+        "nutrition": {
+          "calories": { "value": 260, "unit": "kcal", "display": "260 kcal" },
+          "protein": { "value": 5, "unit": "g", "display": "5g" },
+          "carbs": { "value": 57, "unit": "g", "display": "57g" },
+          "fat": { "value": 0.5, "unit": "g", "display": "0.5g" }
+        },
         "confidence": 0.93
       }
     ]
@@ -454,6 +464,9 @@ vidasync-bfa/
   "warnings": []
 }
 ```
+
+> Observação: o **BFA interno** pode retornar `value + unit + display` para auditabilidade e rastreabilidade.  
+> O **BFF adapta** para o contrato atual do front (`"610 kcal"`, `"35g"`, etc.) sem quebra.
 
 ### 3. Idempotência
 - Header `Idempotency-Key` para operações não puramente leitura.
@@ -703,7 +716,7 @@ cp .env.example .env
 
 ### 1. Gere o esqueleto dos arquivos principais
 ```text
-src/main/kotlin/com/vidasync_bfa/
+src/main/kotlin/com/vidasync/bfa/
   api/controller/NutritionController.kt
   application/usecase/CalculateNutritionUseCase.kt
   application/dto/NutritionContracts.kt
