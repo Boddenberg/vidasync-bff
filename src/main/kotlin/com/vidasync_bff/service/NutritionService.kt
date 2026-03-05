@@ -5,8 +5,10 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openai.client.OpenAIClient
 import com.openai.models.ChatModel
 import com.openai.models.chat.completions.ChatCompletionCreateParams
+import com.vidasync_bff.client.BfaClient
 import com.vidasync_bff.dto.response.*
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -15,7 +17,9 @@ import java.util.concurrent.TimeUnit
 @Service
 class NutritionService(
     private val openAIClient: OpenAIClient,
-    private val cacheService: IngredientCacheService
+    private val cacheService: IngredientCacheService,
+    private val bfaClient: BfaClient,
+    @Value("\${bfa.enabled:false}") private val bfaEnabled: Boolean
 ) {
 
     private val log = LoggerFactory.getLogger(NutritionService::class.java)
@@ -23,10 +27,30 @@ class NutritionService(
 
     /**
      * Método principal com cache, validação e correção de unidades.
+     * Quando bfa.enabled=true, delega ao BFA (Back for Agents) em vez de chamar OpenAI diretamente.
      * Usado pelo NutritionController.
      */
     fun calculateNutritionSmart(foodDescription: String): CalorieResponse {
-        log.info("=== Smart Nutrition: '{}' ===", foodDescription)
+        log.info("=== Smart Nutrition: '{}' (bfaEnabled={}) ===", foodDescription, bfaEnabled)
+
+        if (bfaEnabled) {
+            log.info("Delegando cálculo nutricional ao BFA")
+            return try {
+                bfaClient.calculateNutrition(foodDescription)
+            } catch (e: Exception) {
+                log.error("Falha ao chamar BFA para cálculo nutricional, usando fallback local: {}", e.message, e)
+                calculateNutritionLocal(foodDescription)
+            }
+        }
+
+        return calculateNutritionLocal(foodDescription)
+    }
+
+    /**
+     * Cálculo nutricional local (via OpenAI direta + cache Supabase).
+     * Usado como fallback quando BFA está desabilitado ou indisponível.
+     */
+    private fun calculateNutritionLocal(foodDescription: String): CalorieResponse {
 
         // 1. Separar ingredientes por vírgula
         val rawIngredients = foodDescription
