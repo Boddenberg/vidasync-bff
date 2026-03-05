@@ -15,7 +15,7 @@
 
 **Registre refeições · Calcule macros com IA · Monte sua linha do tempo nutricional**
 
-[Arquitetura](#-arquitetura) · [Endpoints](#-endpoints) · [Setup](#-setup-local) · [Deploy](#-deploy)
+[Arquitetura](#-arquitetura) · [Endpoints](#-endpoints) · [Setup](#-setup-local) · [Deploy](#-deploy) · [Blueprint BFA](./BFA_ARCHITECTURE_BLUEPRINT.md)
 
 </div>
 
