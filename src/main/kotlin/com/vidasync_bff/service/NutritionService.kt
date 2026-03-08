@@ -23,7 +23,9 @@ class NutritionService(
     private val cacheService: IngredientCacheService,
     private val storageClient: SupabaseStorageClient,
     @Value("\${supabase.pipeline.bucket:pipeline-inputs}") private val pipelineBucket: String,
-    @Value("\${supabase.storage.signed-download-ttl-seconds:120}") private val signedDownloadTtlSeconds: Int
+    @Value("\${supabase.storage.signed-download-ttl-seconds:120}") private val signedDownloadTtlSeconds: Int,
+    @Value("\${nutrition.cache.enabled:true}") private val nutritionCacheEnabled: Boolean,
+    @Value("\${nutrition.cache.image-only.enabled:false}") private val imageOnlyCacheEnabled: Boolean
 ) {
 
     private val log = LoggerFactory.getLogger(NutritionService::class.java)
@@ -79,6 +81,8 @@ class NutritionService(
         } else {
             parsedIngredients
         }
+        val isImageOnlyRequest = parsedIngredients.isEmpty() && !imageUrlForAgent.isNullOrBlank()
+        val shouldUseCache = nutritionCacheEnabled && (!isImageOnlyRequest || imageOnlyCacheEnabled)
         val parseDurationMs = (System.nanoTime() - parseStartedNs) / 1_000_000.0
 
         if (rawIngredients.isEmpty()) {
@@ -102,31 +106,41 @@ class NutritionService(
             rawIngredients,
         )
 
-        val cacheLookupStartedNs = System.nanoTime()
         val keyToOriginal = rawIngredients.associateBy { cacheService.normalizeKey(it) }
-        val cacheHits = cacheService.lookupBatch(keyToOriginal.keys.toList())
-        val cacheLookupDurationMs = (System.nanoTime() - cacheLookupStartedNs) / 1_000_000.0
-
         val hits = mutableListOf<Pair<String, IngredientCacheRow>>()
         val misses = mutableListOf<Pair<String, String>>() // key -> original
 
-        for ((key, original) in keyToOriginal) {
-            val cached = cacheHits[key]
-            if (cached != null) {
-                log.info("CACHE HIT: '{}' -> calories={}", key, cached.calories)
-                hits.add(original to cached)
-            } else {
-                log.info("CACHE MISS: '{}'", key)
-                misses.add(key to original)
+        if (shouldUseCache) {
+            val cacheLookupStartedNs = System.nanoTime()
+            val cacheHits = cacheService.lookupBatch(keyToOriginal.keys.toList())
+            val cacheLookupDurationMs = (System.nanoTime() - cacheLookupStartedNs) / 1_000_000.0
+
+            for ((key, original) in keyToOriginal) {
+                val cached = cacheHits[key]
+                if (cached != null) {
+                    log.info("CACHE HIT: '{}' -> calories={}", key, cached.calories)
+                    hits.add(original to cached)
+                } else {
+                    log.info("CACHE MISS: '{}'", key)
+                    misses.add(key to original)
+                }
             }
+            log.info(
+                "nutrition.stage trace_id={} stage=cache_lookup duration_ms={} cache_hits={} cache_misses={}",
+                traceId,
+                String.format(Locale.US, "%.4f", cacheLookupDurationMs),
+                hits.size,
+                misses.size,
+            )
+        } else {
+            misses.addAll(keyToOriginal.map { (key, original) -> key to original })
+            log.info(
+                "nutrition.stage trace_id={} stage=cache_lookup skipped=true reason={} cache_hits=0 cache_misses={}",
+                traceId,
+                if (isImageOnlyRequest) "image_only_request" else "nutrition_cache_disabled",
+                misses.size
+            )
         }
-        log.info(
-            "nutrition.stage trace_id={} stage=cache_lookup duration_ms={} cache_hits={} cache_misses={}",
-            traceId,
-            String.format(Locale.US, "%.4f", cacheLookupDurationMs),
-            hits.size,
-            misses.size,
-        )
 
         val newResults = mutableListOf<IngredientGatewayResult>()
         val aiEnrichmentStartedNs = System.nanoTime()
@@ -153,7 +167,9 @@ class NutritionService(
             }
             executor.shutdown()
 
-            cacheService.saveBatch(newResults.map { it.cacheRow })
+            if (shouldUseCache) {
+                cacheService.saveBatch(newResults.map { it.cacheRow })
+            }
         }
         val aiEnrichmentDurationMs = (System.nanoTime() - aiEnrichmentStartedNs) / 1_000_000.0
         log.info(
