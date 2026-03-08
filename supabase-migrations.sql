@@ -54,3 +54,21 @@ CREATE TABLE IF NOT EXISTS ingredient_cache (
 CREATE INDEX IF NOT EXISTS idx_ingredient_cache_key ON ingredient_cache(ingredient_key);
 ALTER TABLE ingredient_cache DISABLE ROW LEVEL SECURITY;
 
+-- 8. Tabela de auditoria de clone interno de usuario
+CREATE TABLE IF NOT EXISTS user_clone_audit (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cloned_from UUID NOT NULL,
+    cloned_to UUID NOT NULL,
+    cloned_by TEXT NOT NULL,
+    dry_run BOOLEAN NOT NULL DEFAULT false,
+    when_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_clone_audit_cloned_from ON user_clone_audit(cloned_from);
+CREATE INDEX IF NOT EXISTS idx_user_clone_audit_cloned_to ON user_clone_audit(cloned_to);
+CREATE INDEX IF NOT EXISTS idx_user_clone_audit_cloned_by ON user_clone_audit(cloned_by);
+CREATE INDEX IF NOT EXISTS idx_user_clone_audit_created_at ON user_clone_audit(created_at DESC);
+
+ALTER TABLE user_clone_audit DISABLE ROW LEVEL SECURITY;
+

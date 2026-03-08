@@ -6,6 +6,24 @@
 http://localhost:8080
 ```
 
+## Contrato de dominio (obrigatorio)
+
+- O app deve chamar somente rotas do BFF (`/nutrition`, `/meals`, `/favorites`, `/auth`).
+- O app nao deve chamar a camada de agentes diretamente.
+- O BFF e o unico ponto de orquestracao de IA para o app.
+
+### Revisao no app (`precisa_revisao`)
+
+Quando uma resposta de calorias vier com `precisa_revisao=true`, o app deve abrir uma tela de revisao antes de salvar refeicao.
+
+Campos para usar nessa tela:
+
+- `precisa_revisao` (top-level): habilita fluxo de revisao.
+- `warnings`: mensagens para contexto do usuario.
+- `ingredients[].precisa_revisao`: destaca itens individuais.
+- `ingredients[].warnings`: explica o motivo da revisao por item.
+- `trace_id`: usar para suporte/troubleshooting.
+
 ---
 
 ## 📌 Alteração necessária no Supabase
@@ -63,7 +81,7 @@ Content-Type: application/json
 | mealType    | ✅          | `breakfast`, `lunch`, `dinner`, `snack`             |
 | date        | ✅          | Formato `YYYY-MM-DD`                                |
 | time        | ❌          | Formato `HH:mm`. Se omitido, usa o horário atual   |
-| nutrition   | ❌          | Se omitido, a API calcula via OpenAI automaticamente |
+| nutrition   | ❌          | Se omitido, a API calcula via IA (BFF -> AI Gateway) automaticamente |
 
 ### Resposta (200)
 
@@ -106,7 +124,7 @@ curl --request POST \
 }'
 ```
 
-**Sem nutrition (API calcula via OpenAI):**
+**Sem nutrition (API calcula via IA (BFF -> AI Gateway)):**
 
 ```bash
 curl --request POST \
@@ -543,3 +561,41 @@ Todos os endpoints retornam este formato em caso de erro:
 ```
 
 HTTP Status: `500` para erros internos.
+
+---
+
+## `POST /nutrition/calories` com revisao
+
+### Resposta de sucesso com revisao obrigatoria
+
+```json
+{
+  "nutrition": {
+    "calories": "390 kcal",
+    "protein": "22g",
+    "carbs": "30g",
+    "fat": "18g"
+  },
+  "ingredients": [
+    {
+      "name": "1 porcao de frango",
+      "nutrition": { "calories": "220 kcal", "protein": "20g", "carbs": "0g", "fat": "14g" },
+      "cached": false,
+      "precisa_revisao": true,
+      "warnings": ["Quantidade aproximada detectada."],
+      "trace_id": "3f8f7f1b9c0b4b4c8a0e0d2f3f44f0a1"
+    }
+  ],
+  "precisa_revisao": true,
+  "warnings": ["Quantidade aproximada detectada."],
+  "trace_id": "3f8f7f1b9c0b4b4c8a0e0d2f3f44f0a1"
+}
+```
+
+### Comportamento esperado do app
+
+1. Chamar `POST /nutrition/calories`.
+2. Se `precisa_revisao=true`, abrir tela de revisao com os itens.
+3. Usuario confirma ou edita os itens.
+4. Somente depois enviar `POST /meals`.
+
