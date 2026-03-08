@@ -33,11 +33,17 @@ class NutritionController(private val nutritionService: NutritionService) {
 
             // Any invalid item should return 400 with a user-friendly message.
             if (result.nutrition == null && !result.invalidItems.isNullOrEmpty()) {
-                val msg = when (result.invalidItems.size) {
-                    1 -> "\"${result.invalidItems.first()}\" nao e um alimento valido. Corrija e tente novamente."
-                    else -> "Nao foi possivel calcular. Revise os ingredientes: ${
-                        result.invalidItems.joinToString(", ") { "\"$it\"" }
-                    }."
+                val imageOnlyInvalid = result.invalidItems.size == 1 &&
+                    result.invalidItems.first().equals("itens da imagem", ignoreCase = true)
+                val msg = if (imageOnlyInvalid) {
+                    "Nao foi possivel identificar comida ou porcoes detectaveis na imagem. Tente outra foto."
+                } else {
+                    when (result.invalidItems.size) {
+                        1 -> "\"${result.invalidItems.first()}\" nao e um alimento valido. Corrija e tente novamente."
+                        else -> "Nao foi possivel calcular. Revise os ingredientes: ${
+                            result.invalidItems.joinToString(", ") { "\"$it\"" }
+                        }."
+                    }
                 }
                 log.warn(
                     "POST /nutrition/calories -> 400 | invalidItems={} warnings={} trace_id={}",

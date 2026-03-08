@@ -14,7 +14,18 @@ import java.util.concurrent.TimeoutException
 @Component
 class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
 
+    class AIGatewayRequestException(
+        message: String,
+        val statusCode: Int? = null,
+        val responseBody: String? = null,
+        cause: Throwable? = null
+    ) : RuntimeException(message, cause)
+
     private val log = LoggerFactory.getLogger(AIGatewayClient::class.java)
+    private val agentesBasePath = "/agentes"
+    private val planoImagemPath = "$agentesBasePath/pipeline-plano-imagem"
+    private val planoE2eTemporarioPath = "$agentesBasePath/pipeline-plano-e2e-temporario"
+    private val fotoCaloriasPath = "$agentesBasePath/pipeline-foto-calorias"
 
     fun route(
         contexto: String,
@@ -24,7 +35,6 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
         metadados: Map<String, Any?> = mapOf("origem" to "vidasync-bff")
     ): AIGatewayRouteResponse {
         val resolvedTraceId = traceId?.takeIf { it.isNotBlank() } ?: TraceContext.current()
-        val startedNs = System.nanoTime()
         val request = AIGatewayRouteRequest(
             traceId = resolvedTraceId,
             contexto = contexto,
@@ -32,19 +42,92 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
             payload = payload,
             metadados = metadados
         )
+        return executePost(
+            path = "/ai/router",
+            operation = "ai_router",
+            traceId = resolvedTraceId,
+            body = request
+        )
+    }
 
+    fun pipelinePlanoImagem(
+        imagemUrl: String,
+        contexto: String,
+        idioma: String = "pt-BR",
+        executarOcrLiteral: Boolean = false,
+        traceId: String? = null
+    ): AIGatewayRouteResponse {
+        val resolvedTraceId = traceId?.takeIf { it.isNotBlank() } ?: TraceContext.current()
+        val body = mutableMapOf<String, Any?>(
+            "imagem_url" to imagemUrl,
+            "contexto" to contexto,
+            "idioma" to idioma,
+            "executar_ocr_literal" to executarOcrLiteral
+        )
+        resolvedTraceId?.let { body["trace_id"] = it }
+        return executePost(
+            path = planoImagemPath,
+            operation = "pipeline_plano_imagem",
+            traceId = resolvedTraceId,
+            body = body
+        )
+    }
+
+    fun pipelinePlanoE2eTemporario(
+        payload: Map<String, Any?>,
+        traceId: String? = null
+    ): AIGatewayRouteResponse {
+        val resolvedTraceId = traceId?.takeIf { it.isNotBlank() } ?: TraceContext.current()
+        val body = payload.toMutableMap()
+        resolvedTraceId?.let { body.putIfAbsent("trace_id", it) }
+        return executePost(
+            path = planoE2eTemporarioPath,
+            operation = "pipeline_plano_e2e_temporario",
+            traceId = resolvedTraceId,
+            body = body
+        )
+    }
+
+    fun pipelineFotoCalorias(
+        payload: Map<String, Any?>,
+        idioma: String = "pt-BR",
+        traceId: String? = null
+    ): AIGatewayRouteResponse {
+        val resolvedTraceId = traceId?.takeIf { it.isNotBlank() } ?: TraceContext.current()
+        val body = payload.toMutableMap()
+        body.putIfAbsent("idioma", idioma)
+        resolvedTraceId?.let { body.putIfAbsent("trace_id", it) }
+        return executePost(
+            path = fotoCaloriasPath,
+            operation = "pipeline_foto_calorias",
+            traceId = resolvedTraceId,
+            body = body
+        )
+    }
+
+    private fun executePost(
+        path: String,
+        operation: String,
+        traceId: String?,
+        body: Any
+    ): AIGatewayRouteResponse {
+        val startedNs = System.nanoTime()
+        val payloadKeys = if (body is Map<*, *>) body.keys else emptyList<Any>()
         log.info(
-            "ai_gateway.request trace_id={} contexto={} idioma={} payload_keys={}",
-            resolvedTraceId, contexto, idioma, payload.keys
+            "ai_gateway.request trace_id={} operation={} path={} payload_keys={}",
+            traceId,
+            operation,
+            path,
+            payloadKeys
         )
 
         return try {
-            var requestSpec = aiGatewayRestClient.post().uri("/ai/router")
-            if (!resolvedTraceId.isNullOrBlank()) {
-                requestSpec = requestSpec.header(TraceContext.TRACE_HEADER, resolvedTraceId)
+            var requestSpec = aiGatewayRestClient.post().uri(path)
+            if (!traceId.isNullOrBlank()) {
+                requestSpec = requestSpec.header(TraceContext.TRACE_HEADER, traceId)
             }
             val response = requestSpec
-                .body(request)
+                .body(body)
                 .retrieve()
                 .body(AIGatewayRouteResponse::class.java)
 
@@ -54,9 +137,10 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
 
             val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
             log.info(
-                "ai_gateway.response trace_id={} contexto={} status={} warnings={} duration_ms={}",
-                response.traceId ?: resolvedTraceId,
-                response.contexto,
+                "ai_gateway.response trace_id={} operation={} path={} status={} warnings={} duration_ms={}",
+                response.traceId ?: traceId,
+                operation,
+                path,
                 response.status,
                 response.warnings?.size ?: 0,
                 String.format(Locale.US, "%.4f", durationMs),
@@ -65,31 +149,43 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
         } catch (e: HttpStatusCodeException) {
             val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
             val timeout = e.statusCode.value() in listOf(408, 504)
+            val statusCode = e.statusCode.value()
+            val responseBody = e.responseBodyAsString
             log.error(
-                "ai_gateway.error trace_id={} contexto={} status_code={} timeout={} duration_ms={} body={}",
-                resolvedTraceId,
-                contexto,
-                e.statusCode.value(),
+                "ai_gateway.error trace_id={} operation={} path={} status_code={} timeout={} duration_ms={} body={}",
+                traceId,
+                operation,
+                path,
+                statusCode,
                 timeout,
                 String.format(Locale.US, "%.4f", durationMs),
-                e.responseBodyAsString,
+                responseBody,
                 e,
             )
-            throw IllegalStateException("Falha ao chamar AI Gateway: HTTP ${e.statusCode.value()}", e)
+            throw AIGatewayRequestException(
+                message = "Falha ao chamar AI Gateway em $operation: HTTP $statusCode",
+                statusCode = statusCode,
+                responseBody = responseBody,
+                cause = e
+            )
         } catch (e: Exception) {
             val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
             val timeout = isTimeoutFailure(e)
             log.error(
-                "ai_gateway.error trace_id={} contexto={} timeout={} duration_ms={} error_type={} error_message={}",
-                resolvedTraceId,
-                contexto,
+                "ai_gateway.error trace_id={} operation={} path={} timeout={} duration_ms={} error_type={} error_message={}",
+                traceId,
+                operation,
+                path,
                 timeout,
                 String.format(Locale.US, "%.4f", durationMs),
                 e::class.java.simpleName,
                 e.message,
                 e,
             )
-            throw IllegalStateException("Falha ao chamar AI Gateway: ${e.message}", e)
+            throw AIGatewayRequestException(
+                message = "Falha ao chamar AI Gateway em $operation: ${e.message}",
+                cause = e
+            )
         }
     }
 

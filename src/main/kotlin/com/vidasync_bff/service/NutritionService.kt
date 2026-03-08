@@ -279,22 +279,36 @@ class NutritionService(
         original: String,
         imageUrlForAgent: String?
     ): IngredientGatewayResult {
-        log.info("AI Gateway request (calcular_calorias_texto): '{}'", original)
+        log.info(
+            "AI Gateway request nutrition ingredient='{}' has_image_url={}",
+            original,
+            !imageUrlForAgent.isNullOrBlank()
+        )
         return try {
-            val payload = mutableMapOf<String, Any?>("foods" to original)
-            if (!imageUrlForAgent.isNullOrBlank()) {
-                payload["image_url"] = imageUrlForAgent
-            }
-            val gatewayResponse = aiGatewayClient.route(
-                contexto = "calcular_calorias_texto",
-                payload = payload,
-                idioma = "pt-BR",
-                metadados = mapOf(
-                    "origem" to "vidasync-bff",
-                    "feature" to "nutrition",
-                    "has_image_url" to !imageUrlForAgent.isNullOrBlank()
+            val gatewayResponse = if (!imageUrlForAgent.isNullOrBlank()) {
+                val payload = mutableMapOf<String, Any?>(
+                    "image_url" to imageUrlForAgent
                 )
-            )
+                if (!original.equals("itens da imagem", ignoreCase = true)) {
+                    payload["foods"] = original
+                }
+                aiGatewayClient.pipelineFotoCalorias(
+                    payload = payload,
+                    idioma = "pt-BR",
+                    traceId = TraceContext.current()
+                )
+            } else {
+                aiGatewayClient.route(
+                    contexto = "calcular_calorias_texto",
+                    payload = mapOf("foods" to original),
+                    idioma = "pt-BR",
+                    metadados = mapOf(
+                        "origem" to "vidasync-bff",
+                        "feature" to "nutrition",
+                        "has_image_url" to false
+                    )
+                )
+            }
 
             if (gatewayResponse.status.equals("erro", ignoreCase = true)) {
                 throw IllegalStateException("AI Gateway retornou status=erro para '$original'")
@@ -304,6 +318,45 @@ class NutritionService(
                 key = key,
                 original = original,
                 gatewayResponse = gatewayResponse
+            )
+        } catch (e: AIGatewayClient.AIGatewayRequestException) {
+            if (e.statusCode == 422 && !imageUrlForAgent.isNullOrBlank()) {
+                log.warn(
+                    "AI Gateway retornou 422 no pipeline-foto-calorias para ingrediente='{}' body={}",
+                    original,
+                    e.responseBody
+                )
+                return IngredientGatewayResult(
+                    cacheRow = IngredientCacheRow(
+                        ingredientKey = key,
+                        originalInput = original,
+                        correctedInput = original,
+                        calories = "0 kcal",
+                        protein = "0g",
+                        carbs = "0g",
+                        fat = "0g",
+                        isValidFood = false
+                    ),
+                    precisaRevisao = true,
+                    warnings = listOf("Nao foi possivel identificar comida ou porcoes detectaveis na imagem."),
+                    traceId = TraceContext.current()
+                )
+            }
+            log.error("Erro ao consultar AI Gateway para '{}': {}", original, e.message, e)
+            IngredientGatewayResult(
+                cacheRow = IngredientCacheRow(
+                    ingredientKey = key,
+                    originalInput = original,
+                    correctedInput = original,
+                    calories = "0 kcal",
+                    protein = "0g",
+                    carbs = "0g",
+                    fat = "0g",
+                    isValidFood = true
+                ),
+                precisaRevisao = true,
+                warnings = listOf("Nao foi possivel validar o ingrediente '$original' com o servico de IA."),
+                traceId = TraceContext.current()
             )
         } catch (e: Exception) {
             log.error("Erro ao consultar AI Gateway para '{}': {}", original, e.message, e)
