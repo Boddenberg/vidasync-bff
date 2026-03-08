@@ -7,7 +7,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-21_(Virtual_Threads)-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/)
-[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-412991?logo=openai&logoColor=white)](https://openai.com/)
+[![AI Gateway](https://img.shields.io/badge/AI-Gateway-4B5563)](#)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_+_Auth_+_Storage-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com/)
 [![Deploy](https://img.shields.io/badge/Railway-Deploy-0B0D0E?logo=railway&logoColor=white)](https://railway.app/)
 
@@ -26,7 +26,7 @@
 | Feature | Como funciona |
 |---|---|
 | 🧠 **Cálculo nutricional com IA** | Cada ingrediente é analisado individualmente pelo GPT-4o-mini em chamadas **assíncronas paralelas** via Virtual Threads |
-| ⚡ **Cache inteligente de ingredientes** | Resultados da IA são salvos no banco — na próxima vez, **zero chamadas à OpenAI** |
+| ⚡ **Cache inteligente de ingredientes** | Resultados da IA são salvos no banco — na próxima vez, **zero chamadas ao gateway** |
 | 🔄 **Correção automática de unidades** | `"250ml de arroz"` → `"250g de arroz"` — a IA corrige e avisa o usuário |
 | 🚫 **Validação de alimentos** | `"100g de cadeira"` → **400 Bad Request** com mensagem amigável |
 | 📸 **Upload de imagens** | Fotos de refeições e favoritos via base64 → Supabase Storage |
@@ -68,7 +68,7 @@
 | **Linguagem** | Kotlin 2.2 |
 | **Framework** | Spring Boot 3.5 |
 | **Runtime** | Java 21 (Virtual Threads para paralelismo) |
-| **IA** | OpenAI GPT-4o-mini (`openai-java 2.1.0`) |
+| **IA** | Gateway interno de agentes (`POST /ai/router`) |
 | **Banco de dados** | Supabase (PostgreSQL via REST API) |
 | **Autenticação** | Supabase Auth (email/password) |
 | **Storage** | Supabase Storage (imagens de refeições e perfil) |
@@ -276,7 +276,7 @@ ingredient_cache         -- Cache de nutrição por ingrediente
 
 - Java 21+
 - Conta no [Supabase](https://supabase.com)
-- API Key da [OpenAI](https://platform.openai.com)
+- URL da camada de agentes (AI Gateway)
 
 ### 1. Clone e configure
 
@@ -288,7 +288,8 @@ cd vidasync-bff/vidasync-bff
 ### 2. Crie o `.env.properties`
 
 ```properties
-OPENAI_API_KEY=sk-proj-...
+AI_GATEWAY_BASE_URL=https://vidasync-multiagents-ia-production.up.railway.app
+AI_GATEWAY_TIMEOUT_MS=120000
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIs...
 ```
@@ -340,7 +341,9 @@ curl -X POST http://localhost:8080/auth/signup \
 
 | Variável | Valor |
 |---|---|
-| `OPENAI_API_KEY` | `sk-proj-...` |
+| `AI_GATEWAY_BASE_URL` | `https://vidasync-multiagents-ia-production.up.railway.app` |
+| `AI_GATEWAY_TIMEOUT_MS` | `120000` |
+| `AI_GATEWAY_API_KEY` | `(opcional)` |
 | `SUPABASE_URL` | `https://xxxxx.supabase.co` |
 | `SUPABASE_ANON_KEY` | `eyJhbG...` |
 
@@ -358,7 +361,7 @@ src/main/kotlin/com/vidasync_bff/
 │   ├── SupabaseClient.kt          # Cliente REST para Supabase (CRUD genérico)
 │   └── SupabaseStorageClient.kt   # Upload de imagens para Supabase Storage
 ├── config/
-│   ├── OpenAIConfig.kt            # Bean do OpenAI client
+│   ├── AIGatewayConfig.kt         # Bean do RestClient do gateway de agentes
 │   ├── SupabaseConfig.kt          # Bean do RestClient configurado para Supabase
 │   ├── RequestLoggingFilter.kt    # Log de request/response HTTP
 │   └── ...
@@ -372,7 +375,7 @@ src/main/kotlin/com/vidasync_bff/
 │   ├── request/                    # DTOs de entrada
 │   └── response/                   # DTOs de saída + Supabase row mappings
 └── service/
-    ├── NutritionService.kt         # 🧠 Motor de IA (cache + parallel + validação)
+    ├── NutritionService.kt         # 🧠 Motor de IA (cache + parallel + AI Gateway)
     ├── IngredientCacheService.kt   # Cache de ingredientes no Supabase
     ├── MealService.kt              # Lógica de refeições
     ├── FavoriteService.kt          # Lógica de favoritos
@@ -393,3 +396,5 @@ Projeto privado — todos os direitos reservados.
   <br/><br/>
   <img src="https://img.shields.io/badge/status-em_desenvolvimento-yellow" />
 </div>
+
+
