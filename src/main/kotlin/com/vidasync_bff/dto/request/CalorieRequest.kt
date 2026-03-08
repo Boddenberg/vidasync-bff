@@ -1,18 +1,18 @@
 package com.vidasync_bff.dto.request
 
-import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonAlias
 
 data class CalorieRequest(
-    val foods: String,
+    val foods: String? = null,
     val image: String? = null,
-    @JsonProperty("image_url")
+    @JsonAlias("image_url", "imageUrl")
     val imageUrl: String? = null,
-    @JsonProperty("file_key")
+    @JsonAlias("file_key", "fileKey", "key")
     val fileKey: String? = null,
-    @JsonProperty("image_key")
+    @JsonAlias("image_key", "imageKey")
     val imageKey: String? = null,
-    @JsonProperty("audio_key")
+    @JsonAlias("audio_key", "audioKey")
     val audioKey: String? = null,
-    @JsonProperty("pdf_key")
+    @JsonAlias("pdf_key", "pdfKey")
     val pdfKey: String? = null
 )

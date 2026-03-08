@@ -41,8 +41,9 @@ class NutritionService(
      */
     fun calculateNutritionSmart(request: CalorieRequest): CalorieResponse {
         val resolvedImageUrl = resolveInputImageUrl(request)
+        val foods = request.foods?.trim().orEmpty()
         return calculateNutritionSmartInternal(
-            foodDescription = request.foods,
+            foodDescription = foods,
             imageUrlForAgent = resolvedImageUrl
         )
     }
@@ -69,10 +70,15 @@ class NutritionService(
             !imageUrlForAgent.isNullOrBlank()
         )
 
-        val rawIngredients = foodDescription
+        val parsedIngredients = foodDescription
             .split(",", "+", " e ", " com ")
             .map { it.trim() }
             .filter { it.isNotBlank() }
+        val rawIngredients = if (parsedIngredients.isEmpty() && !imageUrlForAgent.isNullOrBlank()) {
+            listOf("itens da imagem")
+        } else {
+            parsedIngredients
+        }
         val parseDurationMs = (System.nanoTime() - parseStartedNs) / 1_000_000.0
 
         if (rawIngredients.isEmpty()) {

@@ -20,7 +20,7 @@ class NutritionController(private val nutritionService: NutritionService) {
     fun calculateCalories(@RequestBody request: CalorieRequest): ResponseEntity<CalorieResponse> {
         log.info(
             "POST /nutrition/calories | foods={}, hasImage={}, hasImageUrl={}, hasFileKey={}, hasImageKey={}, hasAudioKey={}, hasPdfKey={}",
-            request.foods,
+            request.foods ?: "",
             !request.image.isNullOrBlank(),
             !request.imageUrl.isNullOrBlank(),
             !request.fileKey.isNullOrBlank(),
