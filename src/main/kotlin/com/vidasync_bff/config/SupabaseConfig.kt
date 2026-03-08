@@ -10,7 +10,8 @@ import org.springframework.web.util.DefaultUriBuilderFactory
 @Configuration
 class SupabaseConfig(
     @Value("\${supabase.url:}") private val supabaseUrl: String,
-    @Value("\${supabase.anon-key:}") private val supabaseAnonKey: String
+    @Value("\${supabase.anon-key:}") private val supabaseAnonKey: String,
+    @Value("\${supabase.service-role-key:}") private val supabaseServiceRoleKey: String
 ) {
 
     private val log = LoggerFactory.getLogger(SupabaseConfig::class.java)
@@ -23,10 +24,19 @@ class SupabaseConfig(
                 "Missing Supabase configuration: 'supabase.url' is not set. Please set SUPABASE_URL in .env.properties or application properties."
             )
         }
-        if (supabaseAnonKey.isBlank()) {
+        val apiKey = when {
+            supabaseServiceRoleKey.isNotBlank() -> supabaseServiceRoleKey.trim()
+            supabaseAnonKey.isNotBlank() -> supabaseAnonKey.trim()
+            else -> ""
+        }
+        if (apiKey.isBlank()) {
             throw IllegalStateException(
-                "Missing Supabase configuration: 'supabase.anon-key' is not set. Please set SUPABASE_ANON_KEY in .env.properties or application properties."
+                "Missing Supabase configuration: neither 'supabase.anon-key' nor 'supabase.service-role-key' is set. " +
+                    "Please set SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY."
             )
+        }
+        if (supabaseAnonKey.isBlank() && supabaseServiceRoleKey.isNotBlank()) {
+            log.warn("Using SUPABASE_SERVICE_ROLE_KEY for Supabase REST client (SUPABASE_ANON_KEY not provided).")
         }
 
         // Normalize URL: remove trailing slash and ensure scheme
@@ -49,8 +59,8 @@ class SupabaseConfig(
 
         return RestClient.builder()
             .uriBuilderFactory(uriFactory)
-            .defaultHeader("apikey", supabaseAnonKey)
-            .defaultHeader("Authorization", "Bearer $supabaseAnonKey")
+            .defaultHeader("apikey", apiKey)
+            .defaultHeader("Authorization", "Bearer $apiKey")
             .defaultHeader("Content-Type", "application/json")
             .defaultHeader("Prefer", "return=representation")
             .build()
