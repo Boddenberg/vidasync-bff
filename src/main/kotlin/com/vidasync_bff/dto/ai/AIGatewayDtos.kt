@@ -23,6 +23,7 @@ data class AIGatewayRouteResponse(
     @JsonProperty("precisa_revisao")
     val precisaRevisao: Boolean? = null,
     val resultado: Map<String, Any?>? = null,
+    @JsonProperty("calorias_texto")
+    val caloriasTexto: Map<String, Any?>? = null,
     val erro: Any? = null
 )
-

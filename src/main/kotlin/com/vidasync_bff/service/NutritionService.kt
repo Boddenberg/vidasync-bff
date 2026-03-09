@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 @Service
 class NutritionService(
@@ -25,7 +26,8 @@ class NutritionService(
     @Value("\${supabase.pipeline.bucket:pipeline-inputs}") private val pipelineBucket: String,
     @Value("\${supabase.storage.signed-download-ttl-seconds:120}") private val signedDownloadTtlSeconds: Int,
     @Value("\${nutrition.cache.enabled:true}") private val nutritionCacheEnabled: Boolean,
-    @Value("\${nutrition.cache.image-only.enabled:false}") private val imageOnlyCacheEnabled: Boolean
+    @Value("\${nutrition.cache.image-only.enabled:false}") private val imageOnlyCacheEnabled: Boolean,
+    @Value("\${nutrition.ai.future-timeout-seconds:90}") private val aiFutureTimeoutSeconds: Long
 ) {
 
     private val log = LoggerFactory.getLogger(NutritionService::class.java)
@@ -149,26 +151,46 @@ class NutritionService(
 
             val executor = Executors.newVirtualThreadPerTaskExecutor()
             val futures = misses.map { (key, original) ->
-                executor.submit<IngredientGatewayResult> {
+                Triple(key, original, executor.submit<IngredientGatewayResult> {
                     callAIGatewayForSingleIngredient(
                         key = key,
                         original = original,
                         imageUrlForAgent = imageUrlForAgent
                     )
-                }
+                })
             }
 
-            for (future in futures) {
+            for ((key, original, future) in futures) {
                 try {
-                    newResults.add(future.get(30, TimeUnit.SECONDS))
+                    newResults.add(future.get(aiFutureTimeoutSeconds, TimeUnit.SECONDS))
                 } catch (e: Exception) {
-                    log.error("Erro ao processar ingrediente via agentes: {}", e.message, e)
+                    future.cancel(true)
+                    val warning = if (isTimeoutFailure(e)) {
+                        "Tempo limite ao consultar o servico de IA para '$original'."
+                    } else {
+                        "Nao foi possivel validar o ingrediente '$original' com o servico de IA."
+                    }
+                    log.error(
+                        "Erro ao processar ingrediente via agentes (ingredient='{}', timeout={}): {}",
+                        original,
+                        isTimeoutFailure(e),
+                        e.message,
+                        e
+                    )
+                    newResults.add(buildGatewayFallbackResult(key = key, original = original, warning = warning))
                 }
             }
             executor.shutdown()
 
             if (shouldUseCache) {
-                cacheService.saveBatch(newResults.map { it.cacheRow })
+                val cacheableRows = newResults
+                    .filter { !it.precisaRevisao && it.warnings.isEmpty() }
+                    .map { it.cacheRow }
+                if (cacheableRows.isNotEmpty()) {
+                    cacheService.saveBatch(cacheableRows)
+                } else {
+                    log.info("Cache skip: nenhum resultado novo elegivel para persistencia")
+                }
             }
         }
         val aiEnrichmentDurationMs = (System.nanoTime() - aiEnrichmentStartedNs) / 1_000_000.0
@@ -383,7 +405,7 @@ class NutritionService(
         original: String,
         gatewayResponse: AIGatewayRouteResponse
     ): IngredientGatewayResult {
-        val resultMap = gatewayResponse.resultado ?: emptyMap()
+        val resultMap = resolveGatewayResultMap(gatewayResponse)
         val itens = asMapList(resultMap["itens"])
         val firstItem = itens.firstOrNull()
         val totals = asMap(resultMap["totais"])
@@ -422,6 +444,47 @@ class NutritionService(
             precisaRevisao = precisaRevisao,
             warnings = gatewayWarnings.distinct(),
             traceId = gatewayResponse.traceId
+        )
+    }
+
+    private fun resolveGatewayResultMap(gatewayResponse: AIGatewayRouteResponse): Map<String, Any?> {
+        val nestedFromResultado = asMap(gatewayResponse.resultado?.get("calorias_texto"))
+        if (nestedFromResultado.isNotEmpty()) {
+            return nestedFromResultado
+        }
+
+        val directResultado = gatewayResponse.resultado
+        if (!directResultado.isNullOrEmpty()) {
+            return directResultado
+        }
+
+        val caloriasTextoTopLevel = gatewayResponse.caloriasTexto
+        if (!caloriasTextoTopLevel.isNullOrEmpty()) {
+            return caloriasTextoTopLevel
+        }
+
+        return emptyMap()
+    }
+
+    private fun buildGatewayFallbackResult(
+        key: String,
+        original: String,
+        warning: String
+    ): IngredientGatewayResult {
+        return IngredientGatewayResult(
+            cacheRow = IngredientCacheRow(
+                ingredientKey = key,
+                originalInput = original,
+                correctedInput = original,
+                calories = "0 kcal",
+                protein = "0g",
+                carbs = "0g",
+                fat = "0g",
+                isValidFood = true
+            ),
+            precisaRevisao = true,
+            warnings = listOf(warning),
+            traceId = TraceContext.current()
         )
     }
 
@@ -563,5 +626,23 @@ class NutritionService(
             }
             else -> null
         }
+    }
+
+    private fun isTimeoutFailure(failure: Throwable?): Boolean {
+        var current = failure
+        while (current != null) {
+            val name = current::class.java.simpleName.lowercase()
+            val message = (current.message ?: "").lowercase()
+            if (
+                current is TimeoutException ||
+                name.contains("timeout") ||
+                message.contains("timeout") ||
+                message.contains("timed out")
+            ) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
     }
 }
