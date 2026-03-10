@@ -13,6 +13,7 @@ import com.vidasync_bff.observability.TraceContext
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -24,7 +25,6 @@ class NutritionService(
     private val cacheService: IngredientCacheService,
     private val storageClient: SupabaseStorageClient,
     @Value("\${supabase.pipeline.bucket:pipeline-inputs}") private val pipelineBucket: String,
-    @Value("\${supabase.storage.signed-download-ttl-seconds:120}") private val signedDownloadTtlSeconds: Int,
     @Value("\${nutrition.cache.enabled:true}") private val nutritionCacheEnabled: Boolean,
     @Value("\${nutrition.cache.image-only.enabled:false}") private val imageOnlyCacheEnabled: Boolean,
     @Value("\${nutrition.ai.future-timeout-seconds:90}") private val aiFutureTimeoutSeconds: Long
@@ -36,7 +36,8 @@ class NutritionService(
         val cacheRow: IngredientCacheRow,
         val precisaRevisao: Boolean,
         val warnings: List<String>,
-        val traceId: String?
+        val traceId: String?,
+        val nomePratoDetectado: String? = null
     )
 
     /**
@@ -151,7 +152,7 @@ class NutritionService(
 
             val executor = Executors.newVirtualThreadPerTaskExecutor()
             val futures = misses.map { (key, original) ->
-                Triple(key, original, executor.submit<IngredientGatewayResult> {
+                Triple(key, original, executor.submit<List<IngredientGatewayResult>> {
                     callAIGatewayForSingleIngredient(
                         key = key,
                         original = original,
@@ -162,7 +163,7 @@ class NutritionService(
 
             for ((key, original, future) in futures) {
                 try {
-                    newResults.add(future.get(aiFutureTimeoutSeconds, TimeUnit.SECONDS))
+                    newResults.addAll(future.get(aiFutureTimeoutSeconds, TimeUnit.SECONDS))
                 } catch (e: Exception) {
                     future.cancel(true)
                     val warning = if (isTimeoutFailure(e)) {
@@ -177,7 +178,9 @@ class NutritionService(
                         e.message,
                         e
                     )
-                    newResults.add(buildGatewayFallbackResult(key = key, original = original, warning = warning))
+                    newResults.add(
+                        buildGatewayFallbackResult(key = key, original = original, warning = warning)
+                    )
                 }
             }
             executor.shutdown()
@@ -206,6 +209,7 @@ class NutritionService(
         val invalidItems = mutableListOf<String>()
         val responseWarnings = linkedSetOf<String>()
         var responseNeedsReview = false
+        var responseDishName: String? = null
         val aggregationStartedNs = System.nanoTime()
 
         for ((original, cached) in hits) {
@@ -248,6 +252,9 @@ class NutritionService(
             }
             if (result.precisaRevisao) responseNeedsReview = true
             responseWarnings.addAll(result.warnings)
+            if (responseDishName.isNullOrBlank()) {
+                responseDishName = result.nomePratoDetectado?.takeIf { it.isNotBlank() }
+            }
         }
 
         if (invalidItems.isNotEmpty()) {
@@ -255,6 +262,7 @@ class NutritionService(
             return CalorieResponse(
                 nutrition = null,
                 invalidItems = invalidItems,
+                nomePratoDetectado = responseDishName,
                 precisaRevisao = true,
                 warnings = responseWarnings.toList().ifEmpty {
                     listOf("Foram encontrados itens invalidos na descricao da refeicao.")
@@ -280,6 +288,7 @@ class NutritionService(
         return CalorieResponse(
             nutrition = totalNutrition,
             ingredients = allIngredients,
+            nomePratoDetectado = responseDishName,
             corrections = corrections.ifEmpty { null },
             invalidItems = invalidItems.ifEmpty { null },
             precisaRevisao = responseNeedsReview,
@@ -300,7 +309,7 @@ class NutritionService(
         key: String,
         original: String,
         imageUrlForAgent: String?
-    ): IngredientGatewayResult {
+    ): List<IngredientGatewayResult> {
         log.info(
             "AI Gateway request nutrition ingredient='{}' has_image_url={}",
             original,
@@ -362,10 +371,11 @@ class NutritionService(
                     precisaRevisao = true,
                     warnings = listOf("Nao foi possivel identificar comida ou porcoes detectaveis na imagem."),
                     traceId = TraceContext.current()
-                )
+                ).let(::listOf)
             }
             log.error("Erro ao consultar AI Gateway para '{}': {}", original, e.message, e)
-            IngredientGatewayResult(
+            listOf(
+                IngredientGatewayResult(
                 cacheRow = IngredientCacheRow(
                     ingredientKey = key,
                     originalInput = original,
@@ -379,10 +389,12 @@ class NutritionService(
                 precisaRevisao = true,
                 warnings = listOf("Nao foi possivel validar o ingrediente '$original' com o servico de IA."),
                 traceId = TraceContext.current()
+                )
             )
         } catch (e: Exception) {
             log.error("Erro ao consultar AI Gateway para '{}': {}", original, e.message, e)
-            IngredientGatewayResult(
+            listOf(
+                IngredientGatewayResult(
                 cacheRow = IngredientCacheRow(
                     ingredientKey = key,
                     originalInput = original,
@@ -396,6 +408,7 @@ class NutritionService(
                 precisaRevisao = true,
                 warnings = listOf("Nao foi possivel validar o ingrediente '$original' com o servico de IA."),
                 traceId = TraceContext.current()
+                )
             )
         }
     }
@@ -404,18 +417,61 @@ class NutritionService(
         key: String,
         original: String,
         gatewayResponse: AIGatewayRouteResponse
-    ): IngredientGatewayResult {
+    ): List<IngredientGatewayResult> {
         val resultMap = resolveGatewayResultMap(gatewayResponse)
         val itens = asMapList(resultMap["itens"])
-        val firstItem = itens.firstOrNull()
         val totals = asMap(resultMap["totais"])
+        val dishName = toStringValue(resultMap["nome_prato_detectado"])
 
         val gatewayWarnings = (gatewayResponse.warnings ?: emptyList()) + toStringList(resultMap["warnings"])
         val warningNoFood = gatewayWarnings.any { it.contains("Nenhum item alimentar", ignoreCase = true) }
+        val gatewayPrecisaRevisao = gatewayResponse.precisaRevisao == true
 
-        val corrected = toStringValue(firstItem?.get("alimento"))
-            ?: toStringValue(firstItem?.get("consulta_canonica"))
-            ?: original
+        val shouldExpandDetectedItems = original.equals("itens da imagem", ignoreCase = true) && itens.size > 1
+        if (shouldExpandDetectedItems) {
+            val expandedResults = itens.mapIndexed { index, item ->
+                val itemName = resolveIngredientName(item, fallback = "item_${index + 1}")
+                val itemWarnings = (gatewayWarnings + toStringList(item["warnings"])).distinct()
+
+                val caloriesValue = toDoubleValue(item["calorias_kcal"])
+                val proteinValue = toDoubleValue(item["proteina_g"])
+                val carbsValue = toDoubleValue(item["carboidratos_g"])
+                val fatValue = toDoubleValue(item["lipidios_g"])
+                val hasAnyMacro = listOf(caloriesValue, proteinValue, carbsValue, fatValue).any { (it ?: 0.0) > 0.0 }
+
+                val isValidFood = (!warningNoFood) && (itemName.isNotBlank() || hasAnyMacro)
+                val precisaRevisao = gatewayPrecisaRevisao || itemWarnings.isNotEmpty() || !isValidFood
+                if (!isValidFood) {
+                    log.warn("AI Gateway marcou item detectado como possivelmente invalido: '{}'", itemName)
+                }
+
+                IngredientGatewayResult(
+                    cacheRow = IngredientCacheRow(
+                        ingredientKey = cacheService.normalizeKey(itemName),
+                        originalInput = itemName,
+                        correctedInput = itemName,
+                        calories = formatKcal(caloriesValue),
+                        protein = formatGrams(proteinValue),
+                        carbs = formatGrams(carbsValue),
+                        fat = formatGrams(fatValue),
+                        isValidFood = isValidFood
+                    ),
+                    precisaRevisao = precisaRevisao,
+                    warnings = itemWarnings,
+                    traceId = gatewayResponse.traceId,
+                    nomePratoDetectado = dishName
+                )
+            }
+
+            if (expandedResults.isNotEmpty()) {
+                return expandedResults
+            }
+        }
+
+        val firstItem = itens.firstOrNull()
+        val itemWarnings = (gatewayWarnings + toStringList(firstItem?.get("warnings"))).distinct()
+
+        val corrected = resolveIngredientName(firstItem, fallback = original)
 
         val caloriesValue = toDoubleValue(firstItem?.get("calorias_kcal") ?: totals["calorias_kcal"])
         val proteinValue = toDoubleValue(firstItem?.get("proteina_g") ?: totals["proteina_g"])
@@ -424,26 +480,33 @@ class NutritionService(
 
         val hasAnyMacro = listOf(caloriesValue, proteinValue, carbsValue, fatValue).any { (it ?: 0.0) > 0.0 }
         val isValidFood = (!warningNoFood) && (firstItem != null || hasAnyMacro)
-        val precisaRevisao = gatewayResponse.precisaRevisao == true || gatewayWarnings.isNotEmpty() || !isValidFood
+        val precisaRevisao = gatewayPrecisaRevisao || itemWarnings.isNotEmpty() || !isValidFood
+        val isImagePlaceholderWithDetectedFood =
+            original.equals("itens da imagem", ignoreCase = true) && firstItem != null
+        val resolvedOriginalInput = if (isImagePlaceholderWithDetectedFood) corrected else original
+        val resolvedKey = if (isImagePlaceholderWithDetectedFood) cacheService.normalizeKey(corrected) else key
 
         if (!isValidFood) {
             log.warn("AI Gateway marcou item como possivelmente invalido: '{}'", original)
         }
 
-        return IngredientGatewayResult(
-            cacheRow = IngredientCacheRow(
-                ingredientKey = key,
-                originalInput = original,
-                correctedInput = corrected,
-                calories = formatKcal(caloriesValue),
-                protein = formatGrams(proteinValue),
-                carbs = formatGrams(carbsValue),
-                fat = formatGrams(fatValue),
-                isValidFood = isValidFood
+        return listOf(
+            IngredientGatewayResult(
+                cacheRow = IngredientCacheRow(
+                    ingredientKey = resolvedKey,
+                    originalInput = resolvedOriginalInput,
+                    correctedInput = corrected,
+                    calories = formatKcal(caloriesValue),
+                    protein = formatGrams(proteinValue),
+                    carbs = formatGrams(carbsValue),
+                    fat = formatGrams(fatValue),
+                    isValidFood = isValidFood
+                ),
+                precisaRevisao = precisaRevisao,
+                warnings = itemWarnings,
+                traceId = gatewayResponse.traceId,
+                nomePratoDetectado = dishName
             ),
-            precisaRevisao = precisaRevisao,
-            warnings = gatewayWarnings.distinct(),
-            traceId = gatewayResponse.traceId
         )
     }
 
@@ -497,18 +560,16 @@ class NutritionService(
         ).firstNotNullOfOrNull { it?.trim()?.takeIf(String::isNotBlank) }
 
         if (!mediaKey.isNullOrBlank()) {
-            val signed = storageClient.createSignedDownloadUrl(
+            val publicUrl = storageClient.buildPublicObjectUrl(
                 fileKey = mediaKey,
-                targetBucket = pipelineBucket,
-                expiresInSeconds = signedDownloadTtlSeconds
+                targetBucket = pipelineBucket
             )
             log.info(
-                "nutrition.input.media resolved via file key (bucket={}, fileKey={}, ttlSeconds={})",
+                "nutrition.input.media resolved via file key (bucket={}, fileKey={}, public_url=true)",
                 pipelineBucket,
-                mediaKey,
-                signedDownloadTtlSeconds
+                mediaKey
             )
-            return signed
+            return publicUrl
         }
 
         val directImageUrl = request.imageUrl?.trim()?.takeIf(String::isNotBlank)
@@ -530,10 +591,9 @@ class NutritionService(
                 fileNamePrefix = "nutrition_fallback",
                 targetBucket = pipelineBucket
             )
-            storageClient.createSignedDownloadUrl(
+            storageClient.buildPublicObjectUrl(
                 fileKey = uploaded.fileKey,
-                targetBucket = pipelineBucket,
-                expiresInSeconds = signedDownloadTtlSeconds
+                targetBucket = pipelineBucket
             )
         }
     }
@@ -606,6 +666,58 @@ class NutritionService(
     private fun toStringValue(value: Any?): String? {
         val text = value?.toString()?.trim() ?: return null
         return text.takeIf { it.isNotBlank() }
+    }
+
+    private fun resolveIngredientName(item: Map<String, Any?>?, fallback: String): String {
+        val extractedFromDescription = extractNameFromOriginalDescription(toStringValue(item?.get("descricao_original")))
+        val alimento = toStringValue(item?.get("alimento"))
+        val nomeAlimento = toStringValue(item?.get("nome_alimento"))
+        val canonical = toStringValue(item?.get("consulta_canonica"))
+
+        if (!alimento.isNullOrBlank() && !extractedFromDescription.isNullOrBlank()) {
+            return if (areEquivalentFoodNames(alimento, extractedFromDescription)) {
+                alimento
+            } else {
+                "$alimento ($extractedFromDescription)"
+            }
+        }
+
+        return alimento
+            ?: nomeAlimento
+            ?: canonical
+            ?: extractedFromDescription
+            ?: fallback
+    }
+
+    private fun extractNameFromOriginalDescription(description: String?): String? {
+        if (description.isNullOrBlank()) return null
+
+        val unitsPattern =
+            "(?:g|kg|mg|ml|l|un|und|unid(?:ade)?s?|colher(?:es)?(?:\\s+de\\s+(?:sopa|cha))?|xicara(?:s)?|fatia(?:s)?|porcao(?:oes)?|pedaco(?:s)?)"
+        val match = Regex(
+            "^\\s*\\d+[\\d.,/]*\\s*$unitsPattern\\b\\s*(?:de|do|da)?\\s*(.+?)\\s*$",
+            RegexOption.IGNORE_CASE
+        ).find(description.trim()) ?: return null
+
+        val extracted = match.groupValues
+            .getOrNull(1)
+            ?.trim()
+            ?.replace(Regex("^\\s*(de|do|da)\\s+", RegexOption.IGNORE_CASE), "")
+            ?.trim(',', '.', ';', ':')
+            ?.trim()
+
+        return extracted?.takeIf { it.isNotBlank() }
+    }
+
+    private fun areEquivalentFoodNames(a: String, b: String): Boolean {
+        return normalizeFoodNameForComparison(a) == normalizeFoodNameForComparison(b)
+    }
+
+    private fun normalizeFoodNameForComparison(value: String): String {
+        val withoutAccents = Normalizer
+            .normalize(value.lowercase(Locale.getDefault()), Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+        return withoutAccents.replace(Regex("[^a-z0-9]+"), " ").trim()
     }
 
     private fun toDoubleValue(value: Any?): Double? {

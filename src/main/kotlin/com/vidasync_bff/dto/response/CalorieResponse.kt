@@ -28,6 +28,8 @@ data class IngredientDetail(
 data class CalorieResponse(
     val nutrition: NutritionData? = null,
     val ingredients: List<IngredientDetail>? = null,
+    @JsonProperty("nome_prato_detectado")
+    val nomePratoDetectado: String? = null,
     val corrections: List<UnitCorrection>? = null,
     val invalidItems: List<String>? = null,
     val error: String? = null,

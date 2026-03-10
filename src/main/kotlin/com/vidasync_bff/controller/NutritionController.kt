@@ -55,6 +55,7 @@ class NutritionController(private val nutritionService: NutritionService) {
                     CalorieResponse(
                         error = msg,
                         invalidItems = result.invalidItems,
+                        nomePratoDetectado = result.nomePratoDetectado,
                         precisaRevisao = true,
                         warnings = result.warnings,
                         traceId = result.traceId
