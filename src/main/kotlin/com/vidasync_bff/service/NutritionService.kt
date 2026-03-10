@@ -419,9 +419,12 @@ class NutritionService(
         gatewayResponse: AIGatewayRouteResponse
     ): List<IngredientGatewayResult> {
         val resultMap = resolveGatewayResultMap(gatewayResponse)
-        val itens = asMapList(resultMap["itens"])
+        val itens = asMapList(resultMap["itens"]).ifEmpty {
+            gatewayResponse.composicao ?: asMapList(resultMap["composicao"])
+        }
         val totals = asMap(resultMap["totais"])
         val dishName = toStringValue(resultMap["nome_prato_detectado"])
+            ?: toStringValue(gatewayResponse.nomePratoDetectado)
 
         val gatewayWarnings = (gatewayResponse.warnings ?: emptyList()) + toStringList(resultMap["warnings"])
         val warningNoFood = gatewayWarnings.any { it.contains("Nenhum item alimentar", ignoreCase = true) }
@@ -430,7 +433,7 @@ class NutritionService(
         val shouldExpandDetectedItems = original.equals("itens da imagem", ignoreCase = true) && itens.size > 1
         if (shouldExpandDetectedItems) {
             val expandedResults = itens.mapIndexed { index, item ->
-                val itemName = resolveIngredientName(item, fallback = "item_${index + 1}")
+                val itemName = resolveIngredientName(item, fallback = "item_${index + 1}", dishName = dishName)
                 val itemWarnings = (gatewayWarnings + toStringList(item["warnings"])).distinct()
 
                 val caloriesValue = toDoubleValue(item["calorias_kcal"])
@@ -471,7 +474,7 @@ class NutritionService(
         val firstItem = itens.firstOrNull()
         val itemWarnings = (gatewayWarnings + toStringList(firstItem?.get("warnings"))).distinct()
 
-        val corrected = resolveIngredientName(firstItem, fallback = original)
+        val corrected = resolveIngredientName(firstItem, fallback = original, dishName = dishName)
 
         val caloriesValue = toDoubleValue(firstItem?.get("calorias_kcal") ?: totals["calorias_kcal"])
         val proteinValue = toDoubleValue(firstItem?.get("proteina_g") ?: totals["proteina_g"])
@@ -668,25 +671,29 @@ class NutritionService(
         return text.takeIf { it.isNotBlank() }
     }
 
-    private fun resolveIngredientName(item: Map<String, Any?>?, fallback: String): String {
+    private fun resolveIngredientName(item: Map<String, Any?>?, fallback: String, dishName: String? = null): String {
         val extractedFromDescription = extractNameFromOriginalDescription(toStringValue(item?.get("descricao_original")))
-        val alimento = toStringValue(item?.get("alimento"))
         val nomeAlimento = toStringValue(item?.get("nome_alimento"))
+        val alimento = toStringValue(item?.get("alimento"))
         val canonical = toStringValue(item?.get("consulta_canonica"))
 
-        if (!alimento.isNullOrBlank() && !extractedFromDescription.isNullOrBlank()) {
-            return if (areEquivalentFoodNames(alimento, extractedFromDescription)) {
-                alimento
-            } else {
-                "$alimento ($extractedFromDescription)"
-            }
+        if (!nomeAlimento.isNullOrBlank()) {
+            return nomeAlimento
         }
 
-        return alimento
-            ?: nomeAlimento
-            ?: canonical
-            ?: extractedFromDescription
-            ?: fallback
+        if (!extractedFromDescription.isNullOrBlank()) {
+            return extractedFromDescription
+        }
+
+        if (!alimento.isNullOrBlank()) {
+            val alimentoIsDish = !dishName.isNullOrBlank() && areEquivalentFoodNames(alimento, dishName)
+            if (alimentoIsDish) {
+                return canonical ?: fallback
+            }
+            return alimento
+        }
+
+        return canonical ?: fallback
     }
 
     private fun extractNameFromOriginalDescription(description: String?): String? {

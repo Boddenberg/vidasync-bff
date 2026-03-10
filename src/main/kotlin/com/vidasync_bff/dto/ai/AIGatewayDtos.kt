@@ -19,6 +19,9 @@ data class AIGatewayRouteResponse(
     val traceId: String? = null,
     val contexto: String? = null,
     val status: String? = null,
+    @JsonProperty("nome_prato_detectado")
+    val nomePratoDetectado: String? = null,
+    val composicao: List<Map<String, Any?>>? = null,
     val warnings: List<String>? = emptyList(),
     @JsonProperty("precisa_revisao")
     val precisaRevisao: Boolean? = null,
