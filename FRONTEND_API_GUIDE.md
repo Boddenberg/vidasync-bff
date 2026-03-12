@@ -599,3 +599,351 @@ HTTP Status: `500` para erros internos.
 3. Usuario confirma ou edita os itens.
 4. Somente depois enviar `POST /meals`.
 
+---
+
+## Agua - meta diaria e ingestao
+
+### Header obrigatorio
+
+Todas as chamadas de agua precisam enviar:
+
+```http
+X-User-Id: <uuid do usuario>
+```
+
+---
+
+### 1. Salvar meta e/ou somar/subtrair agua
+
+```
+POST /water
+Content-Type: application/json
+X-User-Id: <user-id>
+```
+
+Body (todos opcionais, mas envie pelo menos um campo):
+
+```json
+{
+  "date": "2026-03-11",
+  "goalMl": 2500,
+  "deltaMl": 200
+}
+```
+
+Regras:
+- `goalMl`: define ou atualiza a meta do dia.
+- `deltaMl`: soma (positivo) ou remove (negativo) da agua ingerida.
+- `date`: opcional, formato `YYYY-MM-DD`. Se nao enviar, usa o dia atual do servidor.
+- O total nunca fica negativo.
+
+Resposta (200):
+
+```json
+{
+  "water": {
+    "id": "uuid",
+    "date": "2026-03-11",
+    "goalMl": 2500,
+    "consumedMl": 600,
+    "remainingMl": 1900,
+    "progressPercent": 24,
+    "goalReached": false,
+    "createdAt": "2026-03-11T09:00:00Z",
+    "updatedAt": "2026-03-11T10:15:00Z"
+  }
+}
+```
+
+Exemplos para botoes:
+
+```javascript
+// Definir meta (ex: quando o usuario salva no input)
+await fetch(`${BASE_URL}/water`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId
+  },
+  body: JSON.stringify({ date: selectedDate, goalMl: 2500 })
+});
+
+// Botao +200ml
+await fetch(`${BASE_URL}/water`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId
+  },
+  body: JSON.stringify({ date: selectedDate, deltaMl: 200 })
+});
+
+// Botao -15ml
+await fetch(`${BASE_URL}/water`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId
+  },
+  body: JSON.stringify({ date: selectedDate, deltaMl: -15 })
+});
+```
+
+---
+
+### 2. Buscar agua do dia
+
+```
+GET /water?date=2026-03-11
+X-User-Id: <user-id>
+```
+
+Resposta quando existe registro:
+
+```json
+{
+  "water": {
+    "id": "uuid",
+    "date": "2026-03-11",
+    "goalMl": 2500,
+    "consumedMl": 600,
+    "remainingMl": 1900,
+    "progressPercent": 24,
+    "goalReached": false,
+    "createdAt": "2026-03-11T09:00:00Z",
+    "updatedAt": "2026-03-11T10:15:00Z"
+  }
+}
+```
+
+Resposta quando nao existe registro no dia:
+
+```json
+{
+  "water": null
+}
+```
+
+Exemplo fetch:
+
+```javascript
+const res = await fetch(`${BASE_URL}/water?date=${selectedDate}`, {
+  headers: { 'X-User-Id': userId }
+});
+
+const data = await res.json();
+
+if (!data.water) {
+  // mostrar botao/tela para cadastrar meta de agua
+} else {
+  // renderizar meta e total ingerido
+}
+```
+
+---
+
+### Fluxo recomendado da tela de agua
+
+1. Abrir tela e chamar `GET /water?date=<hoje>`.
+2. Se `water == null`, mostrar input de meta e botao "Comecar".
+3. Ao salvar meta, chamar `POST /water` com `goalMl`.
+4. Botoes rapidos chamam `POST /water` com `deltaMl` positivo/negativo.
+5. Atualizar UI usando a resposta do proprio `POST` (nao precisa calcular no front).
+
+Observacao:
+- O backend salva por `user_id + date`, entao o historico diario ja fica pronto para futuras telas de calendario, dias com meta batida e relatorios.
+
+---
+
+## Metas de calorias e macros (calorias, proteina, carbo e gordura)
+
+### Header obrigatorio
+
+Todas as chamadas precisam enviar:
+
+```http
+X-User-Id: <uuid do usuario>
+```
+
+---
+
+### 1. Salvar/atualizar metas do dia
+
+```
+POST /nutrition-goals
+Content-Type: application/json
+X-User-Id: <user-id>
+```
+
+Body (envie pelo menos um campo de meta):
+
+```json
+{
+  "date": "2026-03-11",
+  "caloriesGoal": 2200,
+  "proteinGoal": 160,
+  "carbsGoal": 240,
+  "fatGoal": 70
+}
+```
+
+Regras:
+- `date` e opcional, formato `YYYY-MM-DD`.
+- Se nao enviar `date`, usa o dia atual do servidor.
+- Pode atualizar apenas uma meta sem reenviar todas.
+- Metas negativas retornam erro 400.
+
+Resposta (200):
+
+```json
+{
+  "nutritionGoals": {
+    "id": "uuid",
+    "date": "2026-03-11",
+    "goals": {
+      "calories": 2200,
+      "protein": 160,
+      "carbs": 240,
+      "fat": 70
+    },
+    "consumed": {
+      "calories": 1450.0,
+      "protein": 96.0,
+      "carbs": 150.0,
+      "fat": 42.0
+    },
+    "remaining": {
+      "calories": 750.0,
+      "protein": 64.0,
+      "carbs": 90.0,
+      "fat": 28.0
+    },
+    "progressPercent": {
+      "calories": 66,
+      "protein": 60,
+      "carbs": 63,
+      "fat": 60
+    },
+    "goalReached": {
+      "calories": false,
+      "protein": false,
+      "carbs": false,
+      "fat": false
+    },
+    "allGoalsReached": false,
+    "createdAt": "2026-03-11T09:00:00Z",
+    "updatedAt": "2026-03-11T10:30:00Z"
+  }
+}
+```
+
+Exemplo fetch para salvar meta:
+
+```javascript
+const res = await fetch(`${BASE_URL}/nutrition-goals`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId
+  },
+  body: JSON.stringify({
+    date: selectedDate,
+    caloriesGoal: 2200,
+    proteinGoal: 160,
+    carbsGoal: 240,
+    fatGoal: 70
+  })
+});
+
+const data = await res.json();
+// data.nutritionGoals ja vem com goals + consumed + remaining + percentuais
+```
+
+---
+
+### 2. Buscar progresso nutricional do dia
+
+```
+GET /nutrition-goals?date=2026-03-11
+X-User-Id: <user-id>
+```
+
+Importante:
+- O consumo (`consumed`) e calculado automaticamente a partir das refeicoes da data na tabela `meals`.
+- Sempre que o usuario adicionar/editar/deletar refeicoes, esse valor muda no `GET /nutrition-goals`.
+
+Resposta quando existe meta cadastrada:
+
+```json
+{
+  "nutritionGoals": {
+    "id": "uuid",
+    "date": "2026-03-11",
+    "goals": {
+      "calories": 2200,
+      "protein": 160,
+      "carbs": 240,
+      "fat": 70
+    },
+    "consumed": {
+      "calories": 1450.0,
+      "protein": 96.0,
+      "carbs": 150.0,
+      "fat": 42.0
+    },
+    "remaining": {
+      "calories": 750.0,
+      "protein": 64.0,
+      "carbs": 90.0,
+      "fat": 28.0
+    },
+    "progressPercent": {
+      "calories": 66,
+      "protein": 60,
+      "carbs": 63,
+      "fat": 60
+    },
+    "goalReached": {
+      "calories": false,
+      "protein": false,
+      "carbs": false,
+      "fat": false
+    },
+    "allGoalsReached": false
+  }
+}
+```
+
+Resposta quando nao existe meta para o dia:
+
+```json
+{
+  "nutritionGoals": null
+}
+```
+
+Exemplo fetch:
+
+```javascript
+const res = await fetch(`${BASE_URL}/nutrition-goals?date=${selectedDate}`, {
+  headers: { 'X-User-Id': userId }
+});
+const data = await res.json();
+
+if (!data.nutritionGoals) {
+  // mostrar formulario de cadastro de metas do dia
+} else {
+  // renderizar progresso dos macros e calorias
+}
+```
+
+---
+
+### Fluxo recomendado da tela de metas nutricionais
+
+1. Ao abrir a tela, chamar `GET /nutrition-goals?date=<hoje>`.
+2. Se vier `null`, mostrar formulario de metas (caloria/proteina/carbo/gordura).
+3. Salvar metas com `POST /nutrition-goals`.
+4. Ao mudar refeicoes do dia, recarregar `GET /nutrition-goals` para atualizar consumo.
+5. Usar `progressPercent`, `remaining` e `goalReached` direto da API (sem recalculo no front).
+
