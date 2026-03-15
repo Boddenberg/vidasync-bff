@@ -1208,3 +1208,166 @@ const weights = data.weights;
 3. Para listar historico, chamar `GET /weight`.
 4. Usar `date`, `time` e `weightKg` para montar tabela, cards ou grafico no front.
 
+---
+
+## Feedback para desenvolvedores
+
+### Header obrigatorio
+
+Todas as chamadas precisam enviar:
+
+```http
+X-User-Id: <uuid do usuario>
+```
+
+---
+
+### 1. Enviar feedback
+
+```
+POST /feedback
+Content-Type: application/json
+X-User-Id: <user-id>
+```
+
+Body:
+
+```json
+{
+  "userName": "Joao Silva",
+  "message": "Seria legal melhorar a tela inicial e corrigir o bug do botao salvar.",
+  "imageUrl": "https://meu-bucket.s3.amazonaws.com/debugs/print-123.png"
+}
+```
+
+Regras:
+- `message` e obrigatoria.
+- `userName` e obrigatorio.
+- `imageUrl` e opcional e pode ser `null`.
+- O backend salva automaticamente data e horario do envio.
+- O backend nao valida profundamente a URL da imagem; se vier preenchida, ele guarda o texto enviado.
+
+Resposta (200):
+
+```json
+{
+  "feedback": {
+    "id": "uuid",
+    "userId": "uuid-do-usuario",
+    "userName": "Joao Silva",
+    "message": "Seria legal melhorar a tela inicial e corrigir o bug do botao salvar.",
+    "imageUrl": "https://meu-bucket.s3.amazonaws.com/debugs/print-123.png",
+    "status": "OPEN",
+    "developerResponse": null,
+    "respondedAt": null,
+    "respondedBy": null,
+    "responseSeenAt": null,
+    "createdAt": "2026-03-15T14:22:10.000Z",
+    "updatedAt": "2026-03-15T14:22:10.000Z",
+    "date": "2026-03-15",
+    "time": "14:22:10"
+  }
+}
+```
+
+Exemplo fetch:
+
+```javascript
+const res = await fetch(`${BASE_URL}/feedback`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId
+  },
+  body: JSON.stringify({
+    userName: profileName,
+    message: feedbackText,
+    imageUrl: screenshotUrl || null
+  })
+});
+
+const data = await res.json();
+console.log(data.feedback);
+```
+
+---
+
+### 2. Buscar todos os feedbacks para o painel admin
+
+Esse endpoint foi pensado para a area interna de desenvolvedor/admin.
+
+```
+GET /feedback
+X-User-Id: <seu-user-id-admin>
+X-Internal-Api-Key: <internal-admin-api-key>
+```
+
+Importante:
+- Se `INTERNAL_ADMIN_API_KEY` estiver configurada no backend, esse header precisa ser enviado.
+- O retorno ja vem com campos preparados para resposta futura do desenvolvedor.
+
+Resposta (200):
+
+```json
+{
+  "feedbacks": [
+    {
+      "id": "uuid-1",
+      "userId": "uuid-user-1",
+      "userName": "Joao Silva",
+      "message": "Seria legal melhorar a tela inicial.",
+      "imageUrl": null,
+      "status": "OPEN",
+      "developerResponse": null,
+      "respondedAt": null,
+      "respondedBy": null,
+      "responseSeenAt": null,
+      "createdAt": "2026-03-15T14:22:10.000Z",
+      "updatedAt": "2026-03-15T14:22:10.000Z",
+      "date": "2026-03-15",
+      "time": "14:22:10"
+    },
+    {
+      "id": "uuid-2",
+      "userId": "uuid-user-2",
+      "userName": "Maria",
+      "message": "No Android a foto ficou cortada.",
+      "imageUrl": "https://cdn.exemplo.com/bug-android.png",
+      "status": "ANSWERED",
+      "developerResponse": "Obrigado, ajustamos isso na versao 1.0.2.",
+      "respondedAt": "2026-03-16T09:00:00.000Z",
+      "respondedBy": "admin@vidasync",
+      "responseSeenAt": null,
+      "createdAt": "2026-03-15T10:00:00.000Z",
+      "updatedAt": "2026-03-16T09:00:00.000Z",
+      "date": "2026-03-15",
+      "time": "10:00:00"
+    }
+  ]
+}
+```
+
+Exemplo fetch:
+
+```javascript
+const res = await fetch(`${BASE_URL}/feedback`, {
+  headers: {
+    'X-User-Id': adminUserId,
+    'X-Internal-Api-Key': internalApiKey
+  }
+});
+
+const data = await res.json();
+const feedbacks = data.feedbacks;
+```
+
+---
+
+### Fluxo recomendado da tela de feedback
+
+1. O usuario preenche `userName`, `message` e opcionalmente `imageUrl`.
+2. O front chama `POST /feedback`.
+3. O backend salva a mensagem com `status = OPEN`.
+4. O painel admin chama `GET /feedback` para listar tudo.
+5. No futuro, voce pode adicionar um endpoint de resposta usando os campos que ja ficaram preparados no banco (`developerResponse`, `respondedAt`, `respondedBy`, `responseSeenAt`).
+

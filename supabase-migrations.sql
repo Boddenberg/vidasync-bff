@@ -173,3 +173,32 @@ CREATE INDEX IF NOT EXISTS idx_weight_entries_user_id ON weight_entries(user_id)
 CREATE INDEX IF NOT EXISTS idx_weight_entries_user_measured_at ON weight_entries(user_id, measured_at DESC);
 
 ALTER TABLE weight_entries DISABLE ROW LEVEL SECURITY;
+
+-- 13. Tabela de feedbacks para desenvolvedores
+CREATE TABLE IF NOT EXISTS developer_feedback (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    user_name TEXT NOT NULL,
+    message TEXT NOT NULL,
+    image_url TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    developer_response TEXT,
+    responded_at TIMESTAMPTZ,
+    responded_by TEXT,
+    response_seen_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_developer_feedback_status CHECK (status IN ('OPEN', 'ANSWERED'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_developer_feedback_user_id ON developer_feedback(user_id);
+CREATE INDEX IF NOT EXISTS idx_developer_feedback_status ON developer_feedback(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_developer_feedback_created_at ON developer_feedback(created_at DESC);
+
+DROP TRIGGER IF EXISTS trg_developer_feedback_updated_at ON developer_feedback;
+CREATE TRIGGER trg_developer_feedback_updated_at
+BEFORE UPDATE ON developer_feedback
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at_timestamp();
+
+ALTER TABLE developer_feedback DISABLE ROW LEVEL SECURITY;
