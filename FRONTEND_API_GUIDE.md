@@ -635,7 +635,9 @@ Regras:
 - `goalMl`: define ou atualiza a meta do dia.
 - `deltaMl`: soma (positivo) ou remove (negativo) da agua ingerida.
 - `date`: opcional, formato `YYYY-MM-DD`. Se nao enviar, usa o dia atual do servidor.
-- O total nunca fica negativo.
+- O total nunca fica negativo. Se o usuario tentar remover mais agua do que existe no dia, o backend limita o saldo em `0`.
+- Cada `deltaMl` gera um item no historico (`events`) para aquele dia.
+- Se o dia ainda nao tiver meta propria, o backend reaproveita a ultima meta configurada em uma data anterior.
 
 Resposta (200):
 
@@ -649,8 +651,25 @@ Resposta (200):
     "remainingMl": 1900,
     "progressPercent": 24,
     "goalReached": false,
+    "goalInherited": false,
     "createdAt": "2026-03-11T09:00:00Z",
-    "updatedAt": "2026-03-11T10:15:00Z"
+    "updatedAt": "2026-03-11T10:15:00Z",
+    "events": [
+      {
+        "id": "event-1",
+        "date": "2026-03-11",
+        "deltaMl": 200,
+        "action": "ADD",
+        "runningConsumedMl": 200
+      },
+      {
+        "id": "event-2",
+        "date": "2026-03-11",
+        "deltaMl": 400,
+        "action": "ADD",
+        "runningConsumedMl": 600
+      }
+    ]
   }
 }
 ```
@@ -691,14 +710,14 @@ await fetch(`${BASE_URL}/water`, {
 
 ---
 
-### 2. Buscar agua do dia
+### 2. Buscar panorama do dia
 
 ```
 GET /water?date=2026-03-11
 X-User-Id: <user-id>
 ```
 
-Resposta quando existe registro:
+Resposta quando existe registro no dia:
 
 ```json
 {
@@ -710,13 +729,50 @@ Resposta quando existe registro:
     "remainingMl": 1900,
     "progressPercent": 24,
     "goalReached": false,
+    "goalInherited": false,
     "createdAt": "2026-03-11T09:00:00Z",
-    "updatedAt": "2026-03-11T10:15:00Z"
+    "updatedAt": "2026-03-11T10:15:00Z",
+    "events": [
+      {
+        "id": "event-1",
+        "date": "2026-03-11",
+        "deltaMl": 200,
+        "action": "ADD",
+        "runningConsumedMl": 200
+      },
+      {
+        "id": "event-2",
+        "date": "2026-03-11",
+        "deltaMl": 400,
+        "action": "ADD",
+        "runningConsumedMl": 600
+      }
+    ]
   }
 }
 ```
 
-Resposta quando nao existe registro no dia:
+Resposta quando ainda nao existe linha no dia, mas ja existe uma meta anterior:
+
+```json
+{
+  "water": {
+    "id": null,
+    "date": "2026-03-12",
+    "goalMl": 2500,
+    "consumedMl": 0,
+    "remainingMl": 2500,
+    "progressPercent": 0,
+    "goalReached": false,
+    "goalInherited": true,
+    "createdAt": null,
+    "updatedAt": null,
+    "events": []
+  }
+}
+```
+
+Resposta quando o usuario ainda nao tem nenhuma meta nem nenhum consumo de agua:
 
 ```json
 {
@@ -734,10 +790,102 @@ const res = await fetch(`${BASE_URL}/water?date=${selectedDate}`, {
 const data = await res.json();
 
 if (!data.water) {
-  // mostrar botao/tela para cadastrar meta de agua
+  // usuario ainda nao configurou nenhuma meta de agua
 } else {
-  // renderizar meta e total ingerido
+  // renderizar panorama do dia com data.water.goalMl, data.water.consumedMl e data.water.events
 }
+```
+
+---
+
+### 3. Buscar historico de agua
+
+Por padrao, retorna do primeiro dia relevante ate `endDate` (ou hoje, se `endDate` nao for enviado).
+
+```
+GET /water/history?startDate=2026-03-01&endDate=2026-03-12
+X-User-Id: <user-id>
+```
+
+Resposta (200):
+
+```json
+{
+  "waterHistory": {
+    "startDate": "2026-03-01",
+    "endDate": "2026-03-12",
+    "days": [
+      {
+        "id": "uuid-dia-1",
+        "date": "2026-03-11",
+        "goalMl": 3000,
+        "consumedMl": 2500,
+        "remainingMl": 500,
+        "progressPercent": 83,
+        "goalReached": false,
+        "goalInherited": false,
+        "createdAt": "2026-03-11T09:00:00Z",
+        "updatedAt": "2026-03-11T18:30:00Z",
+        "events": [
+          {
+            "id": "event-1",
+            "date": "2026-03-11",
+            "deltaMl": 500,
+            "action": "ADD",
+            "runningConsumedMl": 500
+          },
+          {
+            "id": "event-2",
+            "date": "2026-03-11",
+            "deltaMl": 500,
+            "action": "ADD",
+            "runningConsumedMl": 1000
+          },
+          {
+            "id": "event-3",
+            "date": "2026-03-11",
+            "deltaMl": -500,
+            "action": "REMOVE",
+            "runningConsumedMl": 500
+          }
+        ]
+      },
+      {
+        "id": null,
+        "date": "2026-03-12",
+        "goalMl": 3000,
+        "consumedMl": 0,
+        "remainingMl": 3000,
+        "progressPercent": 0,
+        "goalReached": false,
+        "goalInherited": true,
+        "createdAt": null,
+        "updatedAt": null,
+        "events": []
+      }
+    ]
+  }
+}
+```
+
+Observacoes:
+- `days` vem em ordem crescente de data.
+- Cada item de `events` representa uma movimentacao real do dia.
+- `action` pode vir como `ADD`, `REMOVE` ou `ADJUSTMENT`.
+- `ADJUSTMENT` pode aparecer em dias antigos, quando existia apenas o saldo consolidado e o backend precisou representar esse legado como um ajuste unico.
+
+Exemplo fetch:
+
+```javascript
+const res = await fetch(
+  `${BASE_URL}/water/history?startDate=2026-03-01&endDate=2026-03-12`,
+  {
+    headers: { 'X-User-Id': userId }
+  }
+);
+
+const data = await res.json();
+const days = data.waterHistory.days;
 ```
 
 ---
@@ -746,12 +894,16 @@ if (!data.water) {
 
 1. Abrir tela e chamar `GET /water?date=<hoje>`.
 2. Se `water == null`, mostrar input de meta e botao "Comecar".
-3. Ao salvar meta, chamar `POST /water` com `goalMl`.
-4. Botoes rapidos chamam `POST /water` com `deltaMl` positivo/negativo.
-5. Atualizar UI usando a resposta do proprio `POST` (nao precisa calcular no front).
+3. Se `water.goalInherited == true`, usar a ultima meta configurada normalmente no panorama do dia.
+4. Ao salvar meta, chamar `POST /water` com `goalMl`.
+5. Botoes rapidos chamam `POST /water` com `deltaMl` positivo/negativo.
+6. Atualizar a UI usando a resposta do proprio `POST`.
+7. Para montar calendario, tabela ou relatorio, chamar `GET /water/history`.
 
 Observacao:
-- O backend salva por `user_id + date`, entao o historico diario ja fica pronto para futuras telas de calendario, dias com meta batida e relatorios.
+- O panorama do dia continua em `GET /water`.
+- O historico detalhado por dias e movimentos fica em `GET /water/history`.
+- A meta diaria fica congelada por data. Se a pessoa mudar a meta amanha, os dias anteriores nao sao alterados.
 
 ---
 
@@ -781,16 +933,18 @@ Body (envie pelo menos um campo de meta):
 {
   "date": "2026-03-11",
   "caloriesGoal": 2200,
-  "proteinGoal": 160,
-  "carbsGoal": 240,
-  "fatGoal": 70
+  "proteinGoal": 160
 }
 ```
 
 Regras:
 - `date` e opcional, formato `YYYY-MM-DD`.
 - Se nao enviar `date`, usa o dia atual do servidor.
-- Pode atualizar apenas uma meta sem reenviar todas.
+- Pode enviar apenas as metas que quer alterar.
+- Se um campo nao for enviado, o backend reaproveita a ultima meta efetiva daquele campo ate essa data.
+- Se for a primeira configuracao da pessoa, os campos nao enviados continuam `null`.
+- Alterar a meta de hoje nao altera automaticamente dias passados.
+- Para corrigir um dia especifico, basta reenviar o `POST /nutrition-goals` com a `date` daquele dia.
 - Metas negativas retornam erro 400.
 
 Resposta (200):
@@ -803,34 +957,10 @@ Resposta (200):
     "goals": {
       "calories": 2200,
       "protein": 160,
-      "carbs": 240,
-      "fat": 70
+      "carbs": null,
+      "fat": null
     },
-    "consumed": {
-      "calories": 1450.0,
-      "protein": 96.0,
-      "carbs": 150.0,
-      "fat": 42.0
-    },
-    "remaining": {
-      "calories": 750.0,
-      "protein": 64.0,
-      "carbs": 90.0,
-      "fat": 28.0
-    },
-    "progressPercent": {
-      "calories": 66,
-      "protein": 60,
-      "carbs": 63,
-      "fat": 60
-    },
-    "goalReached": {
-      "calories": false,
-      "protein": false,
-      "carbs": false,
-      "fat": false
-    },
-    "allGoalsReached": false,
+    "goalInherited": false,
     "createdAt": "2026-03-11T09:00:00Z",
     "updatedAt": "2026-03-11T10:30:00Z"
   }
@@ -849,19 +979,17 @@ const res = await fetch(`${BASE_URL}/nutrition-goals`, {
   body: JSON.stringify({
     date: selectedDate,
     caloriesGoal: 2200,
-    proteinGoal: 160,
-    carbsGoal: 240,
-    fatGoal: 70
+    proteinGoal: 160
   })
 });
 
 const data = await res.json();
-// data.nutritionGoals ja vem com goals + consumed + remaining + percentuais
+// data.nutritionGoals ja vem com a meta efetiva do dia
 ```
 
 ---
 
-### 2. Buscar progresso nutricional do dia
+### 2. Buscar meta nutricional do dia
 
 ```
 GET /nutrition-goals?date=2026-03-11
@@ -869,8 +997,9 @@ X-User-Id: <user-id>
 ```
 
 Importante:
-- O consumo (`consumed`) e calculado automaticamente a partir das refeicoes da data na tabela `meals`.
-- Sempre que o usuario adicionar/editar/deletar refeicoes, esse valor muda no `GET /nutrition-goals`.
+- Se nao existir linha explicita naquele dia, mas existir meta anterior, o backend devolve a ultima meta efetiva herdada.
+- Esse endpoint nao calcula consumo, restante ou percentual.
+- O front deve cruzar essa resposta com o endpoint de refeicoes/pratos para mostrar se a meta foi batida ou nao.
 
 Resposta quando existe meta cadastrada:
 
@@ -885,36 +1014,34 @@ Resposta quando existe meta cadastrada:
       "carbs": 240,
       "fat": 70
     },
-    "consumed": {
-      "calories": 1450.0,
-      "protein": 96.0,
-      "carbs": 150.0,
-      "fat": 42.0
-    },
-    "remaining": {
-      "calories": 750.0,
-      "protein": 64.0,
-      "carbs": 90.0,
-      "fat": 28.0
-    },
-    "progressPercent": {
-      "calories": 66,
-      "protein": 60,
-      "carbs": 63,
-      "fat": 60
-    },
-    "goalReached": {
-      "calories": false,
-      "protein": false,
-      "carbs": false,
-      "fat": false
-    },
-    "allGoalsReached": false
+    "goalInherited": false,
+    "createdAt": "2026-03-11T09:00:00Z",
+    "updatedAt": "2026-03-11T10:30:00Z"
   }
 }
 ```
 
-Resposta quando nao existe meta para o dia:
+Resposta quando ainda nao existe linha naquele dia, mas ja existe meta anterior:
+
+```json
+{
+  "nutritionGoals": {
+    "id": null,
+    "date": "2026-03-12",
+    "goals": {
+      "calories": 2200,
+      "protein": 160,
+      "carbs": null,
+      "fat": 70
+    },
+    "goalInherited": true,
+    "createdAt": null,
+    "updatedAt": null
+  }
+}
+```
+
+Resposta quando o usuario ainda nao cadastrou nenhuma meta:
 
 ```json
 {
@@ -931,9 +1058,9 @@ const res = await fetch(`${BASE_URL}/nutrition-goals?date=${selectedDate}`, {
 const data = await res.json();
 
 if (!data.nutritionGoals) {
-  // mostrar formulario de cadastro de metas do dia
+  // usuario ainda nao configurou nenhuma meta nutricional
 } else {
-  // renderizar progresso dos macros e calorias
+  // renderizar apenas os campos/metas que vierem != null
 }
 ```
 
@@ -943,7 +1070,14 @@ if (!data.nutritionGoals) {
 
 1. Ao abrir a tela, chamar `GET /nutrition-goals?date=<hoje>`.
 2. Se vier `null`, mostrar formulario de metas (caloria/proteina/carbo/gordura).
-3. Salvar metas com `POST /nutrition-goals`.
-4. Ao mudar refeicoes do dia, recarregar `GET /nutrition-goals` para atualizar consumo.
-5. Usar `progressPercent`, `remaining` e `goalReached` direto da API (sem recalculo no front).
+3. Se `goalInherited == true`, usar normalmente a meta herdada no panorama do dia.
+4. Salvar metas com `POST /nutrition-goals`, enviando apenas os campos alterados.
+5. Para corrigir um dia especifico, reenviar `POST /nutrition-goals` com a `date` daquele dia.
+6. Buscar as refeicoes/pratos do dia em outro endpoint e comparar no front com `nutritionGoals.goals`.
+7. O front decide se a meta foi batida ou nao com base nessa comparacao.
+
+Observacoes:
+- O front pode renderizar so os indicadores cujas metas vierem preenchidas em `goals`.
+- Enquanto a pessoa nao alterar a meta novamente, os dias futuros usam a ultima meta efetiva.
+- Alteracoes em uma data nao retroagem nem alteram automaticamente datas anteriores.
 

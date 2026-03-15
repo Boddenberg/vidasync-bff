@@ -104,7 +104,34 @@ EXECUTE FUNCTION set_updated_at_timestamp();
 
 ALTER TABLE water_daily_intake DISABLE ROW LEVEL SECURITY;
 
--- 10. Tabela de metas nutricionais diarias (calorias e macros)
+-- 10. Tabela de historico de movimentos de agua
+CREATE TABLE IF NOT EXISTS water_intake_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    date TEXT NOT NULL,
+    delta_ml INTEGER NOT NULL CHECK (delta_ml <> 0),
+    event_type TEXT NOT NULL DEFAULT 'ADD',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_water_intake_events_event_type CHECK (event_type IN ('ADD', 'REMOVE', 'ADJUSTMENT'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_water_intake_events_user_id ON water_intake_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_water_intake_events_user_date ON water_intake_events(user_id, date DESC, created_at ASC);
+
+INSERT INTO water_intake_events (user_id, date, delta_ml, event_type, created_at)
+SELECT w.user_id, w.date, w.consumed_ml, 'ADJUSTMENT', w.created_at
+FROM water_daily_intake w
+WHERE w.consumed_ml > 0
+  AND NOT EXISTS (
+      SELECT 1
+      FROM water_intake_events e
+      WHERE e.user_id = w.user_id
+        AND e.date = w.date
+  );
+
+ALTER TABLE water_intake_events DISABLE ROW LEVEL SECURITY;
+
+-- 11. Tabela de metas nutricionais diarias (calorias e macros)
 CREATE TABLE IF NOT EXISTS daily_nutrition_goals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
@@ -132,4 +159,3 @@ FOR EACH ROW
 EXECUTE FUNCTION set_updated_at_timestamp();
 
 ALTER TABLE daily_nutrition_goals DISABLE ROW LEVEL SECURITY;
-

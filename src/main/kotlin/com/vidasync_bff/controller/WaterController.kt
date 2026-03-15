@@ -58,4 +58,24 @@ class WaterController(
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }
+
+    @GetMapping("/history")
+    fun getHistory(
+        @RequestHeader("X-User-Id") userId: String,
+        @RequestParam(required = false) startDate: String?,
+        @RequestParam(required = false) endDate: String?
+    ): ResponseEntity<Any> {
+        log.info("GET /water/history | userId={}, startDate={}, endDate={}", userId, startDate, endDate)
+        return try {
+            val result = waterService.getHistory(userId, startDate, endDate)
+            log.info("GET /water/history -> 200 | totalDays={}", result.days.size)
+            ResponseEntity.ok(mapOf("waterHistory" to result))
+        } catch (e: IllegalArgumentException) {
+            log.warn("GET /water/history -> 400 | error={}", e.message)
+            ResponseEntity.badRequest().body(mapOf("error" to e.message))
+        } catch (e: Exception) {
+            log.error("GET /water/history -> 500 | error={}", e.message, e)
+            ResponseEntity.internalServerError().body(mapOf("error" to e.message))
+        }
+    }
 }
