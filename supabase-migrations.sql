@@ -159,3 +159,17 @@ FOR EACH ROW
 EXECUTE FUNCTION set_updated_at_timestamp();
 
 ALTER TABLE daily_nutrition_goals DISABLE ROW LEVEL SECURITY;
+
+-- 12. Tabela de historico de peso corporal
+CREATE TABLE IF NOT EXISTS weight_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    weight_kg NUMERIC(6,2) NOT NULL CHECK (weight_kg > 0),
+    measured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_weight_entries_user_id ON weight_entries(user_id);
+CREATE INDEX IF NOT EXISTS idx_weight_entries_user_measured_at ON weight_entries(user_id, measured_at DESC);
+
+ALTER TABLE weight_entries DISABLE ROW LEVEL SECURITY;

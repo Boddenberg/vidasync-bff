@@ -1081,3 +1081,130 @@ Observacoes:
 - Enquanto a pessoa nao alterar a meta novamente, os dias futuros usam a ultima meta efetiva.
 - Alteracoes em uma data nao retroagem nem alteram automaticamente datas anteriores.
 
+---
+
+## Peso corporal
+
+### Header obrigatorio
+
+Todas as chamadas precisam enviar:
+
+```http
+X-User-Id: <uuid do usuario>
+```
+
+---
+
+### 1. Salvar novo peso
+
+```
+POST /weight
+Content-Type: application/json
+X-User-Id: <user-id>
+```
+
+Body:
+
+```json
+{
+  "weightKg": 120.5
+}
+```
+
+Regras:
+- O backend aceita apenas o peso atual.
+- Nao existe envio de delta como `-1` ou `+2`.
+- O horario e a data sao gerados automaticamente no servidor no momento do cadastro.
+- `weightKg` deve ser maior que zero.
+
+Resposta (200):
+
+```json
+{
+  "weight": {
+    "id": "uuid",
+    "weightKg": 120.5,
+    "measuredAt": "2026-03-15T12:34:56.000Z",
+    "date": "2026-03-15",
+    "time": "12:34:56"
+  }
+}
+```
+
+Exemplo fetch:
+
+```javascript
+const res = await fetch(`${BASE_URL}/weight`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId
+  },
+  body: JSON.stringify({
+    weightKg: 120.5
+  })
+});
+
+const data = await res.json();
+console.log(data.weight);
+```
+
+---
+
+### 2. Buscar historico completo de peso
+
+```
+GET /weight
+X-User-Id: <user-id>
+```
+
+Resposta (200):
+
+```json
+{
+  "weights": [
+    {
+      "id": "uuid-1",
+      "weightKg": 120.5,
+      "measuredAt": "2026-03-15T12:34:56.000Z",
+      "date": "2026-03-15",
+      "time": "12:34:56"
+    },
+    {
+      "id": "uuid-2",
+      "weightKg": 119.4,
+      "measuredAt": "2026-03-16T08:10:00.000Z",
+      "date": "2026-03-16",
+      "time": "08:10:00"
+    }
+  ]
+}
+```
+
+Observacoes:
+- O retorno vem em ordem crescente de `measuredAt`.
+- Cada item representa uma pesagem real cadastrada pelo usuario.
+- O front pode usar essa lista para grafico, tabela ou linha do tempo.
+
+Exemplo fetch:
+
+```javascript
+const res = await fetch(`${BASE_URL}/weight`, {
+  headers: {
+    'X-User-Id': userId
+  }
+});
+
+const data = await res.json();
+const weights = data.weights;
+```
+
+---
+
+### Fluxo recomendado da tela de peso
+
+1. Quando o usuario informar o peso atual, chamar `POST /weight`.
+2. Atualizar a UI usando a resposta do proprio `POST /weight`.
+3. Para listar historico, chamar `GET /weight`.
+4. Usar `date`, `time` e `weightKg` para montar tabela, cards ou grafico no front.
+
