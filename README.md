@@ -1,400 +1,534 @@
-<div align="center">
+# VidaSync BFF
 
-# 🥗 VidaSync BFF
+Backend-for-frontend em Kotlin + Spring Boot para um app de acompanhamento nutricional.
 
-### Backend-For-Frontend do seu assistente nutricional inteligente
+Este README foi reescrito para documentar a arquitetura atual do projeto, explicar como os fluxos acontecem hoje e mapear melhorias com foco em tempo de resposta.
 
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![Java](https://img.shields.io/badge/Java-21_(Virtual_Threads)-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/)
-[![AI Gateway](https://img.shields.io/badge/AI-Gateway-4B5563)](#)
-[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_+_Auth_+_Storage-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com/)
-[![Deploy](https://img.shields.io/badge/Railway-Deploy-0B0D0E?logo=railway&logoColor=white)](https://railway.app/)
+## Objetivo deste documento
 
-<br/>
+Este documento descreve:
 
-**Registre refeições · Calcule macros com IA · Monte sua linha do tempo nutricional**
+- a arquitetura atual do codigo
+- como as requests atravessam o sistema
+- quais integracoes externas existem hoje
+- onde a complexidade esta concentrada
+- quais melhorias devem trazer melhor latencia com menor risco
 
-[Arquitetura](#-arquitetura) · [Endpoints](#-endpoints) · [Setup](#-setup-local) · [Deploy](#-deploy)
-
-</div>
-
----
-
-## ✨ Destaques
-
-| Feature | Como funciona |
-|---|---|
-| 🧠 **Cálculo nutricional com IA** | Cada ingrediente é analisado individualmente pelo GPT-4o-mini em chamadas **assíncronas paralelas** via Virtual Threads |
-| ⚡ **Cache inteligente de ingredientes** | Resultados da IA são salvos no banco — na próxima vez, **zero chamadas ao gateway** |
-| 🔄 **Correção automática de unidades** | `"250ml de arroz"` → `"250g de arroz"` — a IA corrige e avisa o usuário |
-| 🚫 **Validação de alimentos** | `"100g de cadeira"` → **400 Bad Request** com mensagem amigável |
-| 📸 **Upload de imagens** | Fotos de refeições e favoritos via base64 → Supabase Storage |
-| 📅 **Linha do tempo por dia** | Refeições com horário, resumo diário com soma de macros |
-| 🔐 **Autenticação simples** | Login por username + senha via Supabase Auth (sem JWT no cliente) |
-| 🩹 **Auto-heal de perfis** | Se o perfil sumir do banco, o login recria automaticamente |
-
----
-
-## 🏗 Arquitetura
-
-```
-┌──────────────┐        ┌──────────────────────────────────────┐
-│   Frontend   │───────▶│           VidaSync BFF               │
-│  (React Native)       │                                      │
-└──────────────┘        │  ┌──────────┐  ┌──────────────────┐  │
-                        │  │Controllers│  │    Services       │  │
-                        │  │  • Auth   │  │  • NutritionSvc  │  │
-                        │  │  • Meals  │──│  • MealSvc       │  │
-                        │  │  • Favs   │  │  • FavoriteSvc   │  │
-                        │  │  • Nutri  │  │  • AuthSvc       │  │
-                        │  │  • Health │  │  • CacheSvc      │  │
-                        │  └──────────┘  └────────┬─────────┘  │
-                        │                         │            │
-                        │         ┌───────────────┼──────┐     │
-                        │         ▼               ▼      ▼     │
-                        │  ┌──────────┐  ┌──────┐ ┌────────┐   │
-                        │  │ OpenAI   │  │Supa  │ │Supa    │   │
-                        │  │ GPT-4o   │  │base  │ │base    │   │
-                        │  │ mini     │  │REST  │ │Storage │   │
-                        │  └──────────┘  └──────┘ └────────┘   │
-                        └──────────────────────────────────────┘
-```
-
-### Stack tecnológica
+## Stack atual
 
 | Camada | Tecnologia |
-|---|---|
-| **Linguagem** | Kotlin 2.2 |
-| **Framework** | Spring Boot 3.5 |
-| **Runtime** | Java 21 (Virtual Threads para paralelismo) |
-| **IA** | Gateway interno de agentes (`POST /ai/router`) |
-| **Banco de dados** | Supabase (PostgreSQL via REST API) |
-| **Autenticação** | Supabase Auth (email/password) |
-| **Storage** | Supabase Storage (imagens de refeições e perfil) |
-| **HTTP Client** | Spring RestClient + Apache HttpClient 5 |
-| **Serialização** | Jackson + kotlin-module |
-| **Build** | Gradle 9.3 (Kotlin DSL) |
-| **Container** | Docker (multi-stage build, Temurin JRE 21) |
-| **Deploy** | Railway |
+| --- | --- |
+| Linguagem | Kotlin 2.2.21 |
+| Framework | Spring Boot 3.5.0 |
+| Runtime | Java 21 |
+| HTTP server | spring-boot-starter-web |
+| Cliente HTTP | Spring RestClient |
+| Banco e persistencia | Supabase REST |
+| Storage | Supabase Storage |
+| IA | AI Gateway interno |
+| Serializacao | Jackson + jackson-module-kotlin |
+| Criptografia | BCrypt |
+| Observabilidade | logs estruturados + endpoint `/metrics` em formato Prometheus |
 
----
+## Visao geral da arquitetura atual
 
-## 📡 Endpoints
+Hoje a aplicacao segue majoritariamente este desenho:
 
-### 🔓 Rotas públicas
-
-| Método | Rota | Descrição |
-|---|---|---|
-| `GET` | `/health` | Health check |
-| `POST` | `/auth/signup` | Criar conta |
-| `POST` | `/auth/login` | Login (retorna `userId` + `accessToken`) |
-| `POST` | `/nutrition/calories` | Calcular macros com IA |
-
-### 🔒 Rotas autenticadas (header `X-User-Id`)
-
-#### 🍽 Refeições
-
-| Método | Rota | Descrição |
-|---|---|---|
-| `POST` | `/meals` | Criar refeição |
-| `GET` | `/meals?date=YYYY-MM-DD` | Listar refeições do dia |
-| `GET` | `/meals/summary?date=YYYY-MM-DD` | Resumo do dia (soma de macros) |
-| `GET` | `/meals/range?startDate=...&endDate=...` | Refeições por período |
-| `PUT` | `/meals/{id}` | Editar refeição (update parcial) |
-| `DELETE` | `/meals/{id}` | Deletar refeição |
-| `POST` | `/meals/{id}/duplicate` | Duplicar refeição |
-
-#### ⭐ Favoritos
-
-| Método | Rota | Descrição |
-|---|---|---|
-| `POST` | `/favorites` | Criar prato favorito (com foto opcional) |
-| `GET` | `/favorites` | Listar favoritos |
-| `DELETE` | `/favorites/{id}` | Deletar favorito |
-
-#### 👤 Perfil
-
-| Método | Rota | Headers extras | Descrição |
-|---|---|---|---|
-| `GET` | `/auth/profile` | — | Ver perfil |
-| `PUT` | `/auth/profile` | `X-Access-Token` | Editar perfil/senha/username |
-
----
-
-## 🧠 Motor de Nutrição Inteligente
-
-O coração do VidaSync é o `NutritionService` — um pipeline que combina IA com cache para calcular macros de forma rápida e econômica:
-
-```
-Input: "200g arroz, 150g frango, 1 banana, 100g cadeira"
-          │
-          ▼
-   ┌─────────────┐
-   │ 1. SPLIT    │  Separa por  ,  +  e  com
-   │             │  → ["200g arroz", "150g frango", "1 banana", "100g cadeira"]
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │ 2. CACHE    │  Busca no ingredient_cache (1 query SQL)
-   │   LOOKUP    │  → HIT: "200g arroz" ✅  MISS: "frango", "banana", "cadeira" ❌
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │ 3. OPENAI   │  1 chamada por ingrediente
-   │  PARALLEL   │  Todas assíncronas via Virtual Threads (Java 21)
-   │             │  → 3 chamadas simultâneas (~1-2s total)
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │ 4. VALIDATE │  GPT retorna is_valid_food = false para "cadeira"
-   │             │  → Qualquer inválido = rejeita tudo (HTTP 400)
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │ 5. CACHE    │  Salva os 3 novos no banco (inclusive os inválidos)
-   │   SAVE      │  → Próxima vez = 0 chamadas à OpenAI
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │ 6. CORRECT  │  "250ml arroz" → "250g arroz" (IA corrige unidades)
-   │   UNITS     │  → Frontend recebe a correção para exibir
-   └──────┬──────┘
-          ▼
-   Output: 400 { error: "\"100g cadeira\" não é um alimento válido." }
-           ou
-           200 { nutrition: { calories, protein, carbs, fat }, ingredients: [...] }
+```mermaid
+flowchart LR
+    A["Client / App Mobile"] --> B["RequestLoggingFilter"]
+    B --> C["Controller"]
+    C --> D["Service"]
+    D --> E["SupabaseClient"]
+    D --> F["SupabaseStorageClient"]
+    D --> G["AIGatewayClient"]
+    B --> H["TraceContext"]
+    B --> I["HttpMetricsRegistry"]
+    I --> J["GET /metrics"]
 ```
 
-### Exemplos de resposta
+Em termos praticos:
 
-**✅ Tudo válido:**
-```json
-{
-  "nutrition": { "calories": "610 kcal", "protein": "35g", "carbs": "77g", "fat": "12g" },
-  "ingredients": [
-    { "name": "200g de arroz", "nutrition": { "calories": "260 kcal", "protein": "5g", "carbs": "57g", "fat": "0.5g" }, "cached": true },
-    { "name": "150g de frango grelhado", "nutrition": { "calories": "350 kcal", "protein": "30g", "carbs": "0g", "fat": "11.5g" }, "cached": false }
-  ],
-  "corrections": null,
-  "invalidItems": null
-}
+1. a request entra no `RequestLoggingFilter`
+2. o filtro cria ou reaproveita `X-Request-ID`
+3. o controller faz parse do request HTTP e delega para um service
+4. o service concentra quase toda a regra de negocio
+5. o service conversa diretamente com:
+   - `SupabaseClient` para REST no banco
+   - `SupabaseStorageClient` para storage
+   - `AIGatewayClient` para IA
+6. o controller converte o resultado em resposta HTTP
+7. o filtro registra metricas e devolve o `X-Request-ID`
+
+## Estrutura atual do projeto
+
+```text
+src/main/kotlin/com/vidasync_bff/
+|-- client/
+|   |-- AIGatewayClient.kt
+|   |-- SupabaseClient.kt
+|   `-- SupabaseStorageClient.kt
+|-- config/
+|   |-- AIGatewayConfig.kt
+|   |-- CorsConfig.kt
+|   |-- JwtAuthFilter.kt
+|   |-- RequestLoggingFilter.kt
+|   |-- SupabaseConfig.kt
+|   `-- UserContext.kt
+|-- controller/
+|   |-- AuthController.kt
+|   |-- FavoriteController.kt
+|   |-- FeedbackController.kt
+|   |-- HealthController.kt
+|   |-- InternalAdminUsersController.kt
+|   |-- MealController.kt
+|   |-- MetricsController.kt
+|   |-- NutritionController.kt
+|   |-- NutritionGoalsController.kt
+|   |-- UploadController.kt
+|   |-- WaterController.kt
+|   `-- WeightController.kt
+|-- dto/
+|   |-- ai/
+|   |-- request/
+|   `-- response/
+|-- observability/
+|   |-- HttpMetricsRegistry.kt
+|   `-- TraceContext.kt
+|-- service/
+|   |-- AuthService.kt
+|   |-- FavoriteService.kt
+|   |-- FeedbackService.kt
+|   |-- IngredientCacheService.kt
+|   |-- InternalAdminUserCloneService.kt
+|   |-- MealService.kt
+|   |-- NutritionGoalsService.kt
+|   |-- NutritionService.kt
+|   |-- UploadService.kt
+|   |-- WaterService.kt
+|   `-- WeightService.kt
+`-- VidasyncBffApplication.kt
 ```
 
-**🔄 Com correção de unidade:**
-```json
-{
-  "nutrition": { "calories": "325 kcal", ... },
-  "corrections": [
-    { "original": "250ml de arroz", "corrected": "250g de arroz" }
-  ]
-}
-```
+## Mapa funcional atual
 
-**🚫 Item inválido (1):**
-```json
-// HTTP 400
-{
-  "error": "\"cadeira\" não é um alimento válido. Corrija e tente novamente.",
-  "invalidItems": ["cadeira"]
-}
-```
+| Dominio | Endpoints principais | Service principal | Integracoes externas |
+| --- | --- | --- | --- |
+| Health | `GET /health` | sem service | nenhuma |
+| Metrics | `GET /metrics` | sem service dedicado | nenhuma |
+| Upload | `POST /uploads/presign` | `UploadService` | Supabase Storage |
+| Auth | `/auth/signup`, `/auth/login`, `/auth/profile` | `AuthService` | Supabase REST, Supabase Storage |
+| Nutrition | `POST /nutrition/calories` | `NutritionService` | AI Gateway, Supabase REST, Supabase Storage |
+| Meals | `/meals` e derivados | `MealService` | Supabase REST, Supabase Storage, NutritionService |
+| Favorites | `/favorites` | `FavoriteService` | Supabase REST, Supabase Storage |
+| Water | `/water`, `/water/history` | `WaterService` | Supabase REST |
+| Nutrition Goals | `/nutrition-goals` | `NutritionGoalsService` | Supabase REST |
+| Weight | `/weight` | `WeightService` | Supabase REST |
+| Feedback | `/feedback` | `FeedbackService` | Supabase REST |
+| Internal Admin Users | `/internal/admin/users/{id}/clone` | `InternalAdminUserCloneService` | Supabase REST |
 
-**🚫 Itens inválidos (2+):**
-```json
-// HTTP 400
-{
-  "error": "Não foi possível calcular. Revise os ingredientes: \"cadeira\", \"mesa\".",
-  "invalidItems": ["cadeira", "mesa"]
-}
-```
+## Como tudo acontece hoje
 
----
+### 1. Fluxo transversal de request
 
-## 🗄 Banco de Dados
+Todas as rotas HTTP passam por:
 
-### Tabelas
+- `RequestLoggingFilter`
+  - faz cache do corpo de request e response
+  - escreve logs de entrada e saida
+  - sanitiza campos sensiveis
+  - detecta timeout
+  - registra metricas em memoria
+- `TraceContext`
+  - resolve ou cria `X-Request-ID`
+- `HttpMetricsRegistry`
+  - acumula contadores e tempos
+  - exposto por `GET /metrics`
 
-```sql
-meals                    -- Refeições do usuário
-├── id UUID PK
-├── user_id UUID
-├── meal_type TEXT       -- breakfast | lunch | snack | dinner
-├── foods TEXT
-├── date TEXT            -- YYYY-MM-DD
-├── time TEXT            -- HH:mm
-├── calories TEXT
-├── protein TEXT
-├── carbs TEXT
-├── fat TEXT
-├── image_url TEXT
-└── created_at TIMESTAMPTZ
+### 2. Fluxo padrao dos modulos CRUD
 
-favorite_meals           -- Pratos favoritos
-├── id UUID PK
-├── user_id UUID
-├── foods TEXT
-├── calories TEXT
-├── protein TEXT
-├── carbs TEXT
-├── fat TEXT
-├── image_url TEXT
-└── created_at TIMESTAMPTZ
+Os dominios `auth`, `favorite`, `feedback`, `weight`, `water`, `nutrition-goals` e boa parte de `meal` seguem um padrao parecido:
 
-user_profiles            -- Perfis de usuário
-├── id UUID PK
-├── user_id UUID UNIQUE
-├── username TEXT UNIQUE
-├── profile_image_url TEXT
-└── created_at TIMESTAMPTZ
+1. controller recebe request
+2. controller faz log e trata excecao HTTP
+3. service valida dados
+4. service monta `queryParams` e `body` manualmente
+5. service chama `SupabaseClient`
+6. service traduz rows do Supabase para DTO publico
+7. controller devolve `ResponseEntity`
 
-ingredient_cache         -- Cache de nutrição por ingrediente
-├── id UUID PK
-├── ingredient_key TEXT UNIQUE  -- key normalizada (lowercase, trim)
-├── original_input TEXT
-├── corrected_input TEXT        -- após correção de unidade pela IA
-├── calories TEXT
-├── protein TEXT
-├── carbs TEXT
-├── fat TEXT
-├── is_valid_food BOOLEAN       -- false = "cadeira", "mesa", etc.
-└── created_at TIMESTAMPTZ
-```
+Hoje o `SupabaseClient` e generico. Isso simplifica a infraestrutura, mas empurra para os services a responsabilidade de:
 
-### Storage Buckets
+- conhecer tabelas e colunas
+- montar filtros REST do Supabase
+- interpretar resposta
+- decidir insert, patch, delete e ordenacao
 
-| Bucket | Uso |
-|---|---|
-| `favorite-images` | Fotos de pratos favoritos + fotos de perfil |
-| `meal-images` | Fotos de refeições |
+### 3. Fluxo de nutricao
 
----
+`NutritionService` e hoje o ponto mais denso do sistema.
 
-## 🚀 Setup Local
+Fluxo atual:
 
-### Pré-requisitos
+1. recebe `CalorieRequest`
+2. resolve a entrada:
+   - `foods`
+   - `imageUrl`
+   - `fileKey`, `imageKey`, `audioKey`, `pdfKey`
+   - fallback legado com base64
+3. quebra o texto em ingredientes
+4. faz lookup no `ingredient_cache`
+5. ingredientes sem cache sao enviados ao AI Gateway em paralelo com virtual threads
+6. interpreta a resposta do gateway
+7. agrega macros, correcoes, warnings e itens invalidos
+8. se houver item invalido, o controller transforma isso em `400`
 
-- Java 21+
-- Conta no [Supabase](https://supabase.com)
-- URL da camada de agentes (AI Gateway)
+Pontos positivos atuais:
 
-### 1. Clone e configure
+- cache por ingrediente
+- paralelismo com Java 21
+- suporte a imagem e arquivos assinados
+- `traceId` propagado ate o gateway
 
-```bash
-git clone https://github.com/seu-usuario/vidasync-bff.git
-cd vidasync-bff/vidasync-bff
-```
+Pontos de atencao:
 
-### 2. Crie o `.env.properties`
+- `NutritionService` concentra parsing, regra, integracao, fallback e montagem de resposta
+- `IngredientCacheService` tambem age como service e client de infraestrutura
+- o controller ainda carrega parte da regra HTTP de itens invalidos
+
+### 4. Fluxo de meals
+
+`MealService` e um orquestrador de persistencia de refeicoes.
+
+Fluxo atual:
+
+1. cria ou atualiza refeicao
+2. se `nutrition` nao vier no request, chama `NutritionService.calculateNutrition(...)`
+3. se vier imagem base64, sobe para o storage na mesma request
+4. persiste em `meals`
+5. lista e agrega resumo diario em memoria
+
+Observacao importante:
+
+- o upload de imagem acontece de forma sincrona no hot path da request
+
+### 5. Fluxo de upload
+
+`UploadService` ja representa uma direcao mais performatica:
+
+1. o cliente pede uma URL assinada em `POST /uploads/presign`
+2. o backend gera `fileKey` e URL assinada
+3. o upload pesado pode acontecer fora do fluxo principal da API de negocio
+
+Esse endpoint e hoje uma base boa para reduzir latencia em outros modulos.
+
+### 6. Fluxo de agua
+
+`WaterService` trabalha com duas tabelas:
+
+- `water_daily_intake`
+- `water_intake_events`
+
+Responsabilidades atuais:
+
+- validar request
+- resolver data
+- herdar meta anterior
+- calcular consumo atual
+- impedir consumo negativo
+- persistir linha diaria
+- persistir eventos
+- montar panorama e historico
+- criar ajuste sintetico para dados legados quando necessario
+
+E um fluxo rico em regra de negocio, mas tambem rico em round trips ao Supabase.
+
+### 7. Fluxo de metas nutricionais
+
+`NutritionGoalsService` usa a tabela `daily_nutrition_goals`.
+
+Hoje ele:
+
+- busca a linha do dia
+- busca o valor mais recente por campo:
+  - `calories_goal`
+  - `protein_goal`
+  - `carbs_goal`
+  - `fat_goal`
+- faz merge com o request atual
+- persiste
+- rele tudo para montar resposta
+
+Isso preserva a regra de heranca por campo, mas custa varias chamadas REST para uma unica operacao.
+
+### 8. Fluxo interno de clone de usuario
+
+`InternalAdminUserCloneService`:
+
+- valida acesso interno
+- carrega perfil, meals e favorites do usuario origem
+- gera novo `userId`
+- gera username unico
+- clona dados
+- grava auditoria
+
+Tambem concentra muita regra e conhecimento de schema num unico service.
+
+## Integracoes externas atuais
+
+### Supabase REST
+
+Usado por quase todos os dominios. Hoje a aplicacao usa um client generico:
+
+- `SupabaseClient.get(...)`
+- `SupabaseClient.post(...)`
+- `SupabaseClient.patch(...)`
+- `SupabaseClient.delete(...)`
+
+Vantagem:
+
+- infraestrutura pequena e simples
+
+Desvantagens:
+
+- query params montados manualmente em varios services
+- pouca semantica por dominio
+- traduzir e otimizar chamadas fica mais dificil
+
+### Supabase Storage
+
+Usado em dois modos:
+
+- upload direto de base64 dentro da request
+- geracao de signed URL
+
+Hoje:
+
+- `MealService`, `FavoriteService` e `AuthService` ainda fazem upload sincrono em varias operacoes
+- `UploadService` ja usa a abordagem de presigned upload
+
+### AI Gateway
+
+Usado principalmente pelo `NutritionService`.
+
+Caracteristicas atuais:
+
+- chamadas HTTP para pipelines do gateway
+- timeout configuravel
+- `traceId` propagado
+- erros encapsulados em `AIGatewayRequestException`
+
+## Onde a complexidade esta concentrada hoje
+
+### Mistura de responsabilidades
+
+Os services mais densos acumulam no mesmo lugar:
+
+- regra de negocio
+- traducao request/response
+- detalhes HTTP do Supabase
+- tratamento de erro de integracao
+- conhecimento de tabela e colunas
+- orquestracao de upload
+
+Os maiores exemplos hoje sao:
+
+- `NutritionService`
+- `WaterService`
+- `InternalAdminUserCloneService`
+- `AuthService`
+
+### DTOs publicos e DTOs de integracao misturados
+
+Em varios arquivos de `dto/response`, o projeto mistura:
+
+- DTO publico da API
+- row do Supabase
+- translator no `companion object`
+
+Exemplos de onde isso acontece:
+
+- `FavoriteResponse.kt`
+- `FeedbackResponse.kt`
+- `MealResponse.kt`
+- `NutritionGoalsResponse.kt`
+- `WaterResponse.kt`
+- `WeightResponse.kt`
+
+### Controllers ainda fazem parte do tratamento de negocio
+
+Alguns controllers estao finos, mas outros ainda:
+
+- montam envelopes `mapOf(...)`
+- traduzem excecoes
+- escolhem mensagens HTTP de negocio
+
+Exemplo claro:
+
+- `NutritionController` monta a mensagem amigavel para itens invalidos
+
+### Arquivos mortos ou legados
+
+Hoje existem arquivos que o proprio codigo marca como nao usados:
+
+- `JwtAuthFilter.kt`
+- `UserContext.kt`
+
+Isso nao piora a latencia sozinho, mas aumenta ruido arquitetural.
+
+## Mapa de gargalos com impacto em tempo de resposta
+
+| Area | Como funciona hoje | Impacto na latencia | Melhoria sugerida |
+| --- | --- | --- | --- |
+| Nutrition cache save | `IngredientCacheService.saveBatch` faz um `POST` por ingrediente | medio a alto em requests com muitos misses | trocar para bulk insert/upsert em uma unica chamada |
+| Nutrition image/base64 | requests com base64 ainda passam pelo filtro e por uploads inline em alguns fluxos | medio | priorizar `fileKey` e signed upload, reduzir uso de base64 em hot path |
+| Nutrition Goals | `POST /nutrition-goals` pode fazer muitas leituras por campo antes e depois de salvar | alto | buscar historico ordenado uma vez e resolver heranca em memoria |
+| Water | `upsert` e `getDay` fazem varias leituras e re-leituras da mesma data | medio | reduzir round trips e reaproveitar estado ja carregado |
+| Meal/Favorite/Auth uploads | upload de imagem acontece dentro da request | medio a alto | usar o endpoint de presign e enviar so URL ou `fileKey` nos fluxos de negocio |
+| Request logging | `RequestLoggingFilter` usa wrappers e loga preview de corpos JSON | medio em payloads grandes | desabilitar preview para rotas com base64 ou payload grande |
+| Supabase REST | chamadas por dominio ainda sao montadas manualmente e em serie | medio | criar clients por dominio e reduzir redundancia de consultas |
+| AI Gateway | uma chamada por ingrediente sem batch nativo | varia conforme a refeicao | manter paralelismo, mas estudar batch por request se o gateway suportar |
+
+## Melhorias priorizadas para ganhar tempo de resposta
+
+### Fase 1 - ganhos rapidos e baixo risco
+
+1. parar de logar preview de corpo em rotas com base64 ou payload grande
+2. transformar o salvamento do `ingredient_cache` em bulk upsert
+3. expandir o uso de `POST /uploads/presign` para meal, favorite e profile image
+4. revisar timeouts e comportamento de retry do AI Gateway
+
+Resultado esperado:
+
+- menos CPU e memoria por request grande
+- menos round trips para cache
+- menos tempo bloqueado em upload sincrono
+
+### Fase 2 - reducao de round trips ao Supabase
+
+1. otimizar `NutritionGoalsService` para carregar historico uma vez e resolver heranca em memoria
+2. otimizar `WaterService` para evitar reler o mesmo dia apos salvar
+3. revisar fluxos que fazem `GET` antes de `PATCH` quando o estado ja esta em memoria
+
+Resultado esperado:
+
+- menor tempo medio por request em dominios CRUD
+- menos dependencia de latencia de rede entre app e Supabase
+
+### Fase 3 - organizacao por integracao
+
+Aplicar gradualmente por dominio:
+
+- `dto/request`
+- `dto/response`
+- request translator
+- response translator
+- client interface
+- client implementation
+- integration service interface
+- integration service implementation
+
+Prioridade sugerida:
+
+1. `upload`
+2. `nutrition-goals`
+3. `water`
+4. `auth`
+5. `favorite`
+6. `feedback`
+7. `weight`
+8. `meal`
+9. `internal admin users`
+
+Motivo:
+
+- melhora legibilidade
+- reduz acoplamento
+- facilita otimizar consultas sem espalhar regra no service principal
+
+### Fase 4 - melhorias estruturais de throughput
+
+1. usar cliente HTTP com pool de conexoes para Supabase e AI Gateway
+2. revisar o custo de `ContentCachingRequestWrapper` e `ContentCachingResponseWrapper`
+3. separar observabilidade de renderizacao em `metrics`
+4. estudar batching no gateway de IA para ingredientes da mesma request
+
+Resultado esperado:
+
+- melhor comportamento sob carga
+- menor custo fixo por request
+- maior previsibilidade de latencia
+
+## O que ja esta bom hoje
+
+Nem tudo precisa mudar. O projeto ja tem boas bases:
+
+- `UploadService` com presigned upload
+- `NutritionService` com virtual threads
+- cache de ingredientes
+- endpoint `/metrics` util para baseline
+- `TraceContext` para correlacao
+- separacao inicial entre controllers, services e clients
+
+## Recomendacao pratica de execucao
+
+Se o objetivo principal for melhorar tempo de resposta sem grande risco, a ordem mais segura e:
+
+1. medir latencia atual por endpoint usando `/metrics` e logs
+2. atacar uploads sincronos
+3. reduzir round trips de `nutrition-goals` e `water`
+4. batch no `ingredient_cache`
+5. so depois iniciar a refatoracao estrutural por integracao
+
+Assim o projeto ganha performance primeiro e organizacao logo em seguida, sem misturar mudanca funcional com refatoracao estrutural.
+
+## Configuracao local
+
+### Variaveis principais
 
 ```properties
-AI_GATEWAY_BASE_URL=https://vidasync-multiagents-ia-production.up.railway.app
+AI_GATEWAY_BASE_URL=
 AI_GATEWAY_TIMEOUT_MS=120000
-SUPABASE_URL=https://xxxxx.supabase.co
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIs...
+AI_GATEWAY_API_KEY=
+
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+INTERNAL_ADMIN_API_KEY=
+
+SUPABASE_STORAGE_BUCKET=favorite-images
+SUPABASE_BUCKET=pipeline-inputs
+SUPABASE_SIGNED_DOWNLOAD_TTL_SECONDS=120
+SUPABASE_SIGNED_UPLOAD_TTL_SECONDS=900
+
+NUTRITION_CACHE_ENABLED=true
+NUTRITION_CACHE_IMAGE_ONLY_ENABLED=false
+NUTRITION_AI_FUTURE_TIMEOUT_SECONDS=90
 ```
 
-### 3. Execute as migrations no Supabase
-
-Copie o conteúdo de `supabase-migrations.sql` e execute no **SQL Editor** do Supabase Dashboard.
-
-### 4. Crie os Storage Buckets
-
-No Supabase Dashboard → Storage:
-- Criar bucket `favorite-images` (público)
-- Criar bucket `meal-images` (público)
-- Adicionar policies de SELECT, INSERT, UPDATE, DELETE para `anon`
-
-### 5. Rode
+### Rodando localmente
 
 ```bash
 ./gradlew bootRun
 ```
 
-O servidor inicia em `http://localhost:8080`
+### Endpoints operacionais
 
-### 6. Teste
+- `GET /health`
+- `GET /metrics`
 
-```bash
-# Health check
-curl http://localhost:8080/health
+## Resumo executivo
 
-# Calcular calorias
-curl -X POST http://localhost:8080/nutrition/calories \
-  -H "Content-Type: application/json" \
-  -d '{"foods": "200g de arroz, 150g de frango grelhado"}'
+Hoje o projeto esta funcional e relativamente simples de operar, mas a maior parte da inteligencia esta concentrada nos services. O principal custo de latencia vem de tres fontes:
 
-# Criar conta
-curl -X POST http://localhost:8080/auth/signup \
-  -H "Content-Type: application/json" \
-  -d '{"username": "joao123", "password": "minhasenha"}'
-```
+- uploads sincronos no hot path
+- excesso de round trips ao Supabase em alguns dominios
+- fluxo de nutricao com IA e cache ainda muito centralizado
 
----
+A melhor estrategia para melhorar tempo de resposta e:
 
-## 🚂 Deploy
-
-### Railway
-
-1. Conecte o repositório no [Railway](https://railway.app)
-2. Configure as variáveis de ambiente:
-
-| Variável | Valor |
-|---|---|
-| `AI_GATEWAY_BASE_URL` | `https://vidasync-multiagents-ia-production.up.railway.app` |
-| `AI_GATEWAY_TIMEOUT_MS` | `120000` |
-| `AI_GATEWAY_API_KEY` | `(opcional)` |
-| `SUPABASE_URL` | `https://xxxxx.supabase.co` |
-| `SUPABASE_ANON_KEY` | `eyJhbG...` |
-
-3. Railway detecta o `Dockerfile` e faz o build automaticamente
-
-**Produção:** `https://vidasync-bff-production.up.railway.app`
-
----
-
-## 📁 Estrutura do Projeto
-
-```
-src/main/kotlin/com/vidasync_bff/
-├── client/
-│   ├── SupabaseClient.kt          # Cliente REST para Supabase (CRUD genérico)
-│   └── SupabaseStorageClient.kt   # Upload de imagens para Supabase Storage
-├── config/
-│   ├── AIGatewayConfig.kt         # Bean do RestClient do gateway de agentes
-│   ├── SupabaseConfig.kt          # Bean do RestClient configurado para Supabase
-│   ├── RequestLoggingFilter.kt    # Log de request/response HTTP
-│   └── ...
-├── controller/
-│   ├── AuthController.kt          # /auth (signup, login, profile)
-│   ├── MealController.kt          # /meals (CRUD + summary + range + duplicate)
-│   ├── FavoriteController.kt      # /favorites (CRUD)
-│   ├── NutritionController.kt     # /nutrition/calories (IA)
-│   └── HealthController.kt        # /health
-├── dto/
-│   ├── request/                    # DTOs de entrada
-│   └── response/                   # DTOs de saída + Supabase row mappings
-└── service/
-    ├── NutritionService.kt         # 🧠 Motor de IA (cache + parallel + AI Gateway)
-    ├── IngredientCacheService.kt   # Cache de ingredientes no Supabase
-    ├── MealService.kt              # Lógica de refeições
-    ├── FavoriteService.kt          # Lógica de favoritos
-    └── AuthService.kt              # Autenticação + perfil
-```
-
----
-
-## 📄 Licença
-
-Projeto privado — todos os direitos reservados.
-
----
-
-<div align="center">
-  <br/>
-  <strong>Feito com 💚 em Kotlin</strong>
-  <br/><br/>
-  <img src="https://img.shields.io/badge/status-em_desenvolvimento-yellow" />
-</div>
-
-
+- reduzir peso das requests
+- diminuir chamadas redundantes ao Supabase
+- aproveitar melhor o endpoint de presign
+- so depois consolidar a arquitetura por integracao
