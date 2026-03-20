@@ -5,6 +5,12 @@ Este arquivo mostra como o front pode:
 - enviar feedback do usuario
 - listar feedbacks no painel interno/admin
 
+Base URL de exemplo:
+
+```text
+http://localhost:8080
+```
+
 Header obrigatorio:
 
 ```http
@@ -35,7 +41,7 @@ Body:
 {
   "userName": "Joao Silva",
   "message": "O botao salvar travou quando eu tentei mandar a foto.",
-  "imageUrl": "https://meu-bucket.com/debugs/print-erro.png" -> mesmo formato que salvamos as outras imagens
+  "imageUrl": "https://meu-bucket.s3.amazonaws.com/debugs/print-erro.png"
 }
 ```
 

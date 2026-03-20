@@ -5,6 +5,8 @@ plugins {
 	id("io.spring.dependency-management") version "1.1.7"
 }
 
+extra["springCloudVersion"] = "2025.0.0"
+
 group = "com.vidasync"
 version = "0.0.1-SNAPSHOT"
 description = "Demo project for Spring Boot"
@@ -19,8 +21,15 @@ repositories {
 	mavenCentral()
 }
 
+dependencyManagement {
+	imports {
+		mavenBom("org.springframework.cloud:spring-cloud-dependencies:${property("springCloudVersion")}")
+	}
+}
+
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-web")
+	implementation("org.springframework.cloud:spring-cloud-starter-openfeign")
 	implementation("org.springframework.security:spring-security-crypto")
 	implementation("org.jetbrains.kotlin:kotlin-reflect")
 	implementation("com.fasterxml.jackson.module:jackson-module-kotlin")

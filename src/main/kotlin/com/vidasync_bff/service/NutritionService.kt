@@ -1,14 +1,17 @@
 package com.vidasync_bff.service
 
-import com.vidasync_bff.client.AIGatewayClient
 import com.vidasync_bff.client.SupabaseStorageClient
-import com.vidasync_bff.dto.ai.AIGatewayRouteResponse
 import com.vidasync_bff.dto.request.CalorieRequest
 import com.vidasync_bff.dto.response.CalorieResponse
 import com.vidasync_bff.dto.response.IngredientCacheRow
 import com.vidasync_bff.dto.response.IngredientDetail
 import com.vidasync_bff.dto.response.NutritionData
 import com.vidasync_bff.dto.response.UnitCorrection
+import com.vidasync_bff.integration.aigateway.AIGatewayIntegration
+import com.vidasync_bff.integration.aigateway.AIGatewayIntegrationException
+import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasIntegrationRequest
+import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
+import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 import com.vidasync_bff.observability.TraceContext
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -21,7 +24,7 @@ import java.util.concurrent.TimeoutException
 
 @Service
 class NutritionService(
-    private val aiGatewayClient: AIGatewayClient,
+    private val aiGatewayIntegration: AIGatewayIntegration,
     private val cacheService: IngredientCacheService,
     private val storageClient: SupabaseStorageClient,
     @Value("\${supabase.pipeline.bucket:pipeline-inputs}") private val pipelineBucket: String,
@@ -317,26 +320,25 @@ class NutritionService(
         )
         return try {
             val gatewayResponse = if (!imageUrlForAgent.isNullOrBlank()) {
-                val payload = mutableMapOf<String, Any?>(
-                    "image_url" to imageUrlForAgent
-                )
-                if (!original.equals("itens da imagem", ignoreCase = true)) {
-                    payload["foods"] = original
-                }
-                aiGatewayClient.pipelineFotoCalorias(
-                    payload = payload,
-                    idioma = "pt-BR",
-                    traceId = TraceContext.current()
+                aiGatewayIntegration.pipelineFotoCalorias(
+                    AIGatewayPipelineFotoCaloriasIntegrationRequest(
+                        imageUrl = imageUrlForAgent,
+                        foods = original.takeUnless { it.equals("itens da imagem", ignoreCase = true) },
+                        idioma = "pt-BR",
+                        traceId = TraceContext.current()
+                    )
                 )
             } else {
-                aiGatewayClient.route(
-                    contexto = "calcular_calorias_texto",
-                    payload = mapOf("foods" to original),
-                    idioma = "pt-BR",
-                    metadados = mapOf(
-                        "origem" to "vidasync-bff",
-                        "feature" to "nutrition",
-                        "has_image_url" to false
+                aiGatewayIntegration.route(
+                    AIGatewayRouteIntegrationRequest(
+                        contexto = "calcular_calorias_texto",
+                        payload = mapOf("foods" to original),
+                        idioma = "pt-BR",
+                        metadados = mapOf(
+                            "origem" to "vidasync-bff",
+                            "feature" to "nutrition",
+                            "has_image_url" to false
+                        )
                     )
                 )
             }
@@ -350,7 +352,7 @@ class NutritionService(
                 original = original,
                 gatewayResponse = gatewayResponse
             )
-        } catch (e: AIGatewayClient.AIGatewayRequestException) {
+        } catch (e: AIGatewayIntegrationException) {
             if (e.statusCode == 422 && !imageUrlForAgent.isNullOrBlank()) {
                 log.warn(
                     "AI Gateway retornou 422 no pipeline-foto-calorias para ingrediente='{}' body={}",
@@ -416,7 +418,7 @@ class NutritionService(
     private fun parseIngredientFromGateway(
         key: String,
         original: String,
-        gatewayResponse: AIGatewayRouteResponse
+        gatewayResponse: AIGatewayIntegrationResponse
     ): List<IngredientGatewayResult> {
         val resultMap = resolveGatewayResultMap(gatewayResponse)
         val itens = asMapList(resultMap["itens"]).ifEmpty {
@@ -513,7 +515,7 @@ class NutritionService(
         )
     }
 
-    private fun resolveGatewayResultMap(gatewayResponse: AIGatewayRouteResponse): Map<String, Any?> {
+    private fun resolveGatewayResultMap(gatewayResponse: AIGatewayIntegrationResponse): Map<String, Any?> {
         val nestedFromResultado = asMap(gatewayResponse.resultado?.get("calorias_texto"))
         if (nestedFromResultado.isNotEmpty()) {
             return nestedFromResultado

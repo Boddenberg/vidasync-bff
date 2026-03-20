@@ -1,0 +1,17 @@
+package com.vidasync_bff.integration.aigateway
+
+import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasIntegrationRequest
+import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eTemporarioIntegrationRequest
+import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemIntegrationRequest
+import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
+import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
+
+interface AIGatewayIntegration {
+    fun route(request: AIGatewayRouteIntegrationRequest): AIGatewayIntegrationResponse
+
+    fun pipelinePlanoImagem(request: AIGatewayPipelinePlanoImagemIntegrationRequest): AIGatewayIntegrationResponse
+
+    fun pipelinePlanoE2eTemporario(request: AIGatewayPipelinePlanoE2eTemporarioIntegrationRequest): AIGatewayIntegrationResponse
+
+    fun pipelineFotoCalorias(request: AIGatewayPipelineFotoCaloriasIntegrationRequest): AIGatewayIntegrationResponse
+}
