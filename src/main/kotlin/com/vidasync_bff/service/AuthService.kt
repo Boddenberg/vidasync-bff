@@ -4,6 +4,7 @@ import com.vidasync_bff.client.SupabaseClient
 import com.vidasync_bff.client.SupabaseStorageClient
 import com.vidasync_bff.dto.request.AuthRequest
 import com.vidasync_bff.dto.request.UpdateProfileRequest
+import com.vidasync_bff.dto.request.UpdateUsernameRequest
 import com.vidasync_bff.dto.response.AuthResponse
 import org.slf4j.LoggerFactory
 import org.springframework.core.ParameterizedTypeReference
@@ -112,6 +113,13 @@ class AuthService(
             username = profile["username"] as? String ?: "",
             profileImageUrl = profile["profile_image_url"] as? String
         )
+    }
+
+    fun changeUsername(userId: String, request: UpdateUsernameRequest): AuthResponse {
+        log.info("AUTH CHANGE USERNAME | userId={}", userId)
+
+        updateUsername(userId, request.username)
+        return getProfile(userId)
     }
 
     fun updateProfile(userId: String, request: UpdateProfileRequest): AuthResponse {

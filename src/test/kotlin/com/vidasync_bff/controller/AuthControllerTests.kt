@@ -1,15 +1,17 @@
 package com.vidasync_bff.controller
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.vidasync_bff.dto.request.AuthRequest
+import com.vidasync_bff.dto.request.UpdateUsernameRequest
 import com.vidasync_bff.dto.response.AuthResponse
 import com.vidasync_bff.service.AuthService
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 
 class AuthControllerTests {
@@ -110,6 +112,49 @@ class AuthControllerTests {
             status { isUnauthorized() }
             content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
             jsonPath("$.error") { value("usuario ou senha invalidos") }
+        }
+    }
+
+    @Test
+    fun `deve retornar 200 ao trocar username`() {
+        val request = UpdateUsernameRequest(username = "novoNome")
+        val response = AuthResponse(
+            userId = "user-1",
+            username = "novonome",
+            profileImageUrl = "https://cdn.example.com/profile.jpg"
+        )
+
+        `when`(authService.changeUsername("user-1", request)).thenReturn(response)
+
+        mockMvc.put("/auth/profile/username") {
+            header("X-User-Id", "user-1")
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(request)
+        }.andExpect {
+            status { isOk() }
+            content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
+            jsonPath("$.userId") { value("user-1") }
+            jsonPath("$.username") { value("novonome") }
+            jsonPath("$.profileImageUrl") { value("https://cdn.example.com/profile.jpg") }
+        }
+    }
+
+    @Test
+    fun `deve retornar 400 ao trocar username quando service lancar excecao`() {
+        val request = UpdateUsernameRequest(username = "novoNome")
+
+        doThrow(RuntimeException("username ja esta em uso"))
+            .`when`(authService)
+            .changeUsername("user-1", request)
+
+        mockMvc.put("/auth/profile/username") {
+            header("X-User-Id", "user-1")
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(request)
+        }.andExpect {
+            status { isBadRequest() }
+            content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
+            jsonPath("$.error") { value("username ja esta em uso") }
         }
     }
 }
