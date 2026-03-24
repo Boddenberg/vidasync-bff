@@ -25,23 +25,21 @@ class AuthService(
         log.info("AUTH SIGNUP | username={}, hasImage={}", request.username, request.profileImage != null)
 
         validateUsername(request.username)
-        if (request.password.length < 6) throw RuntimeException("Senha precisa ter pelo menos 6 caracteres")
+        validatePassword(request.password)
 
-        // Check if username already exists
         val existing = supabaseClient.get(
             "user_profiles",
             mapOf("username" to "eq.${request.username.lowercase()}"),
             object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
         )
         if (!existing.isNullOrEmpty()) {
-            throw RuntimeException("Usuário '${request.username}' já existe")
+            throw RuntimeException("Usuario '${request.username}' ja existe")
         }
 
         val userId = UUID.randomUUID().toString()
         val username = request.username.lowercase()
         val passwordHash = passwordEncoder.encode(request.password)
 
-        // Upload profile image if provided
         var profileImageUrl: String? = null
         request.profileImage?.takeIf { it.isNotBlank() }?.let { base64 ->
             try {
@@ -52,7 +50,6 @@ class AuthService(
             }
         }
 
-        // Save to user_profiles
         val body = mutableMapOf<String, Any>(
             "user_id" to userId,
             "username" to username,
@@ -62,7 +59,8 @@ class AuthService(
 
         try {
             supabaseClient.post(
-                "user_profiles", body,
+                "user_profiles",
+                body,
                 object : ParameterizedTypeReference<List<Map<String, Any>>>() {}
             )
         } catch (e: Exception) {
@@ -71,7 +69,7 @@ class AuthService(
         }
 
         val result = AuthResponse(userId = userId, username = username, profileImageUrl = profileImageUrl)
-        log.info("AUTH SIGNUP → OK | userId={}, username={}", result.userId, result.username)
+        log.info("AUTH SIGNUP -> OK | userId={}, username={}", result.userId, result.username)
         return result
     }
 
@@ -87,34 +85,27 @@ class AuthService(
         )
 
         val profile = rows?.firstOrNull()
-            ?: throw RuntimeException("Usuário ou senha inválidos")
+            ?: throw RuntimeException("Usuario ou senha invalidos")
 
         val storedHash = profile["password_hash"] as? String
-            ?: throw RuntimeException("Usuário ou senha inválidos")
+            ?: throw RuntimeException("Usuario ou senha invalidos")
 
         if (!passwordEncoder.matches(request.password, storedHash)) {
-            throw RuntimeException("Usuário ou senha inválidos")
+            throw RuntimeException("Usuario ou senha invalidos")
         }
 
         val userId = profile["user_id"] as? String ?: ""
         val profileImageUrl = profile["profile_image_url"] as? String
 
         val result = AuthResponse(userId = userId, username = username, profileImageUrl = profileImageUrl)
-        log.info("AUTH LOGIN → OK | userId={}, username={}", result.userId, result.username)
+        log.info("AUTH LOGIN -> OK | userId={}, username={}", result.userId, result.username)
         return result
     }
 
     fun getProfile(userId: String): AuthResponse {
         log.info("AUTH GET PROFILE | userId={}", userId)
 
-        val rows = supabaseClient.get(
-            "user_profiles",
-            mapOf("user_id" to "eq.$userId"),
-            object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
-        )
-
-        val profile = rows?.firstOrNull()
-            ?: throw RuntimeException("Perfil não encontrado")
+        val profile = getProfileRow(userId)
 
         return AuthResponse(
             userId = userId,
@@ -124,46 +115,29 @@ class AuthService(
     }
 
     fun updateProfile(userId: String, request: UpdateProfileRequest): AuthResponse {
-        log.info("AUTH UPDATE PROFILE | userId={}, hasUsername={}, hasPassword={}, hasImage={}",
-            userId, request.username != null, request.password != null, request.profileImage != null)
+        log.info(
+            "AUTH UPDATE PROFILE | userId={}, hasUsername={}, hasPassword={}, hasImage={}",
+            userId,
+            request.username != null,
+            request.password != null,
+            request.profileImage != null
+        )
 
-        // 1. Update username
         request.username?.let { newUsername ->
-            validateUsername(newUsername)
-            val lowered = newUsername.lowercase()
-
-            // Check if new username is taken by someone else
-            val existing = supabaseClient.get(
-                "user_profiles",
-                mapOf("username" to "eq.$lowered", "user_id" to "neq.$userId"),
-                object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
-            )
-            if (!existing.isNullOrEmpty()) {
-                throw RuntimeException("Username '$newUsername' já está em uso")
-            }
-
-            updateProfileField(userId, mapOf("username" to lowered))
+            val lowered = updateUsername(userId, newUsername)
             log.info("AUTH UPDATE | username updated to {}", lowered)
         }
 
-        // 2. Update password
         request.password?.let { newPassword ->
-            if (newPassword.length < 6) throw RuntimeException("Senha precisa ter pelo menos 6 caracteres")
-            val newHash = passwordEncoder.encode(newPassword)
-            updateProfileField(userId, mapOf("password_hash" to newHash))
+            updatePassword(userId, newPassword)
             log.info("AUTH UPDATE | password changed for userId={}", userId)
         }
 
-        // 3. Update profile image
         request.profileImage?.let { base64 ->
             if (base64.isNotBlank()) {
                 try {
-                    val currentProfile = supabaseClient.get(
-                        "user_profiles",
-                        mapOf("user_id" to "eq.$userId"),
-                        object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
-                    )?.firstOrNull()
-                    val username = currentProfile?.get("username") as? String ?: "user"
+                    val currentProfile = getProfileRow(userId)
+                    val username = currentProfile["username"] as? String ?: "user"
 
                     val imageUrl = storageClient.uploadBase64Image(base64, "profile_$username")
                     updateProfileField(userId, mapOf("profile_image_url" to imageUrl))
@@ -178,6 +152,17 @@ class AuthService(
         return getProfile(userId)
     }
 
+    private fun getProfileRow(userId: String): Map<String, Any?> {
+        val rows = supabaseClient.get(
+            "user_profiles",
+            mapOf("user_id" to "eq.$userId"),
+            object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
+        )
+
+        return rows?.firstOrNull()
+            ?: throw RuntimeException("Perfil nao encontrado")
+    }
+
     private fun updateProfileField(userId: String, fields: Map<String, Any>) {
         supabaseClient.patch(
             "user_profiles",
@@ -187,10 +172,37 @@ class AuthService(
         )
     }
 
+    private fun updateUsername(userId: String, newUsername: String): String {
+        validateUsername(newUsername)
+        val lowered = newUsername.lowercase()
+
+        val existing = supabaseClient.get(
+            "user_profiles",
+            mapOf("username" to "eq.$lowered", "user_id" to "neq.$userId"),
+            object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
+        )
+        if (!existing.isNullOrEmpty()) {
+            throw RuntimeException("Username '$newUsername' ja esta em uso")
+        }
+
+        updateProfileField(userId, mapOf("username" to lowered))
+        return lowered
+    }
+
+    private fun updatePassword(userId: String, newPassword: String) {
+        validatePassword(newPassword)
+        val newHash = passwordEncoder.encode(newPassword)
+        updateProfileField(userId, mapOf("password_hash" to newHash))
+    }
+
     private fun validateUsername(username: String) {
-        if (username.isBlank()) throw RuntimeException("Username não pode ser vazio")
+        if (username.isBlank()) throw RuntimeException("Username nao pode ser vazio")
         if (username.length < 3) throw RuntimeException("Username precisa ter pelo menos 3 caracteres")
-        if (username.length > 30) throw RuntimeException("Username pode ter no máximo 30 caracteres")
-        if (!usernameRegex.matches(username)) throw RuntimeException("Username só pode conter letras e números")
+        if (username.length > 30) throw RuntimeException("Username pode ter no maximo 30 caracteres")
+        if (!usernameRegex.matches(username)) throw RuntimeException("Username so pode conter letras e numeros")
+    }
+
+    private fun validatePassword(password: String) {
+        if (password.length < 6) throw RuntimeException("Senha precisa ter pelo menos 6 caracteres")
     }
 }
