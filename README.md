@@ -117,7 +117,7 @@ src/main/kotlin/com/vidasync_bff/
 | Health | `GET /health` | sem service | nenhuma |
 | Metrics | `GET /metrics` | sem service dedicado | nenhuma |
 | Upload | `POST /uploads/presign` | `UploadService` | Supabase Storage |
-| Auth | `/auth/signup`, `/auth/login`, `/auth/profile` | `AuthService` | Supabase REST, Supabase Storage |
+| Auth | `/auth/signup`, `/auth/login`, `/auth/profile`, `/auth/profile/username`, `/auth/profile/password` | `AuthService` | Supabase REST, Supabase Storage |
 | Nutrition | `POST /nutrition/calories` | `NutritionService` | AI Gateway, Supabase REST, Supabase Storage |
 | Meals | `/meals` e derivados | `MealService` | Supabase REST, Supabase Storage, NutritionService |
 | Favorites | `/favorites` | `FavoriteService` | Supabase REST, Supabase Storage |
