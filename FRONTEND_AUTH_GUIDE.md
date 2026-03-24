@@ -128,6 +128,8 @@ const apiFetch = async (path: string, options: RequestInit = {}) => {
 |--------|------|------|----------|
 | `GET` | `/auth/profile` | — | `{ userId, username, profileImageUrl }` |
 | `PUT` | `/auth/profile` | `{ username?, password?, profileImage? }` | `{ userId, username, profileImageUrl }` |
+| `PUT` | `/auth/profile/username` | `{ username }` | `{ userId, username, profileImageUrl }` |
+| `PUT` | `/auth/profile/password` | `{ currentPassword, newPassword }` | `{ success: true }` |
 
 #### Refeições
 
@@ -225,6 +227,28 @@ updateProfile({ username: "novoNome" });
 updateProfile({ password: "novaSenha123" });
 updateProfile({ profileImage: "data:image/jpeg;base64,..." });
 updateProfile({ username: "novoNome", password: "novaSenha", profileImage: "data:image/..." });
+
+// Trocar username com endpoint dedicado
+const changeUsername = async (username: string) => {
+  const res = await apiFetch("/auth/profile/username", {
+    method: "PUT",
+    body: JSON.stringify({ username }),
+  });
+  return res.json();
+};
+
+// Trocar senha com endpoint dedicado
+const changePassword = async (currentPassword: string, newPassword: string) => {
+  const res = await apiFetch("/auth/profile/password", {
+    method: "PUT",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  return res.json();
+};
+
+// Exemplos:
+changeUsername("novoNome");
+changePassword("senhaAtual123", "novaSenha123");
 ```
 
 ---
@@ -259,5 +283,5 @@ Signup com username já existente retorna `400`:
 - [ ] Criar helper `apiFetch` que injeta `X-User-Id` em todas as requests
 - [ ] Substituir todas as chamadas `fetch` / `apiGet` / `apiPost` pelo `apiFetch`
 - [ ] Se `userId` não existe → redirecionar para tela de Login
-- [ ] Tela de perfil: `GET /auth/profile` para exibir, `PUT /auth/profile` para editar
+- [ ] Tela de perfil: `GET /auth/profile` para exibir, `PUT /auth/profile` para editar foto/perfil geral, `PUT /auth/profile/username` para nome e `PUT /auth/profile/password` para senha
 - [ ] Logout = limpar o `userId` do storage e redirecionar para Login
