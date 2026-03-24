@@ -2,6 +2,7 @@ package com.vidasync_bff.controller
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.vidasync_bff.dto.request.AuthRequest
+import com.vidasync_bff.dto.request.UpdatePasswordRequest
 import com.vidasync_bff.dto.request.UpdateUsernameRequest
 import com.vidasync_bff.dto.response.AuthResponse
 import com.vidasync_bff.service.AuthService
@@ -155,6 +156,46 @@ class AuthControllerTests {
             status { isBadRequest() }
             content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
             jsonPath("$.error") { value("username ja esta em uso") }
+        }
+    }
+
+    @Test
+    fun `deve retornar 200 ao trocar senha`() {
+        val request = UpdatePasswordRequest(
+            currentPassword = "senhaAtual123",
+            newPassword = "novaSenha123"
+        )
+
+        mockMvc.put("/auth/profile/password") {
+            header("X-User-Id", "user-1")
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(request)
+        }.andExpect {
+            status { isOk() }
+            content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
+            jsonPath("$.success") { value(true) }
+        }
+    }
+
+    @Test
+    fun `deve retornar 400 ao trocar senha quando service lancar excecao`() {
+        val request = UpdatePasswordRequest(
+            currentPassword = "senhaAtual123",
+            newPassword = "novaSenha123"
+        )
+
+        doThrow(RuntimeException("Senha atual invalida"))
+            .`when`(authService)
+            .changePassword("user-1", request)
+
+        mockMvc.put("/auth/profile/password") {
+            header("X-User-Id", "user-1")
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(request)
+        }.andExpect {
+            status { isBadRequest() }
+            content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
+            jsonPath("$.error") { value("Senha atual invalida") }
         }
     }
 }

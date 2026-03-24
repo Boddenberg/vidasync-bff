@@ -3,6 +3,7 @@ package com.vidasync_bff.service
 import com.vidasync_bff.client.SupabaseClient
 import com.vidasync_bff.client.SupabaseStorageClient
 import com.vidasync_bff.dto.request.AuthRequest
+import com.vidasync_bff.dto.request.UpdatePasswordRequest
 import com.vidasync_bff.dto.request.UpdateProfileRequest
 import com.vidasync_bff.dto.request.UpdateUsernameRequest
 import com.vidasync_bff.dto.response.AuthResponse
@@ -120,6 +121,21 @@ class AuthService(
 
         updateUsername(userId, request.username)
         return getProfile(userId)
+    }
+
+    fun changePassword(userId: String, request: UpdatePasswordRequest) {
+        log.info("AUTH CHANGE PASSWORD | userId={}", userId)
+
+        val profile = getProfileRow(userId)
+        val storedHash = profile["password_hash"] as? String
+            ?: throw RuntimeException("Senha atual nao pode ser validada")
+
+        if (!passwordEncoder.matches(request.currentPassword, storedHash)) {
+            throw RuntimeException("Senha atual invalida")
+        }
+
+        updatePassword(userId, request.newPassword)
+        log.info("AUTH CHANGE PASSWORD | password changed for userId={}", userId)
     }
 
     fun updateProfile(userId: String, request: UpdateProfileRequest): AuthResponse {

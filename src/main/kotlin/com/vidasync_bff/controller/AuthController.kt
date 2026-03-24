@@ -1,6 +1,7 @@
 package com.vidasync_bff.controller
 
 import com.vidasync_bff.dto.request.AuthRequest
+import com.vidasync_bff.dto.request.UpdatePasswordRequest
 import com.vidasync_bff.dto.request.UpdateProfileRequest
 import com.vidasync_bff.dto.request.UpdateUsernameRequest
 import com.vidasync_bff.service.AuthService
@@ -94,6 +95,22 @@ class AuthController(private val authService: AuthService) {
             ResponseEntity.ok(result)
         } catch (e: Exception) {
             log.error("PUT /auth/profile/username -> 400 | error={}", e.message)
+            ResponseEntity.badRequest().body(mapOf("error" to e.message))
+        }
+    }
+
+    @PutMapping("/profile/password")
+    fun changePassword(
+        @RequestHeader("X-User-Id") userId: String,
+        @RequestBody request: UpdatePasswordRequest
+    ): ResponseEntity<Any> {
+        log.info("PUT /auth/profile/password | userId={}", userId)
+        return try {
+            authService.changePassword(userId, request)
+            log.info("PUT /auth/profile/password -> 200 | password changed")
+            ResponseEntity.ok(mapOf("success" to true))
+        } catch (e: Exception) {
+            log.error("PUT /auth/profile/password -> 400 | error={}", e.message)
             ResponseEntity.badRequest().body(mapOf("error" to e.message))
         }
     }
