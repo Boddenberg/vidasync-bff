@@ -32,7 +32,7 @@ class NotificationControllerTests {
                     title = "Resposta da equipe",
                     message = "Respondemos seu feedback.",
                     type = "INFO",
-                    imageUrl = null,
+                    imageUrl = "https://cdn.exemplo.com/notificacoes/feedback.jpg",
                     actionLabel = "Abrir feedback",
                     actionRoute = "/feedback",
                     readAt = null,
@@ -69,6 +69,7 @@ class NotificationControllerTests {
             content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
             jsonPath("$.unreadCount") { value(1) }
             jsonPath("$.notifications[0].id") { value("notif-1") }
+            jsonPath("$.notifications[0].imageUrl") { value("https://cdn.exemplo.com/notificacoes/feedback.jpg") }
             jsonPath("$.notifications[0].deleted") { value(false) }
             jsonPath("$.notifications[1].id") { value("notif-2") }
             jsonPath("$.notifications[1].deleted") { value(true) }

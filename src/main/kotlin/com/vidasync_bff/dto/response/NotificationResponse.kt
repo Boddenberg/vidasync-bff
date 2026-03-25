@@ -8,13 +8,19 @@ import java.time.OffsetDateTime
 data class SupabaseNotificationRow(
     val id: String,
     @JsonProperty("user_id") val userId: String,
+    @JsonProperty("customer_id") val customerId: String? = null,
     val title: String,
-    val message: String,
+    val body: String? = null,
+    val message: String? = null,
     val type: String = "INFO",
+    val channel: String? = null,
+    val priority: String? = null,
+    @JsonProperty("is_read") val isRead: Boolean? = null,
     @JsonProperty("image_url") val imageUrl: String? = null,
     @JsonProperty("action_label") val actionLabel: String? = null,
     @JsonProperty("action_route") val actionRoute: String? = null,
     @JsonProperty("read_at") val readAt: String? = null,
+    @JsonProperty("sent_at") val sentAt: String? = null,
     @JsonProperty("is_deleted") val isDeleted: Boolean = false,
     @JsonProperty("deleted_at") val deletedAt: String? = null,
     @JsonProperty("created_at") val createdAt: String,
@@ -43,7 +49,7 @@ data class NotificationItemResponse(
             return NotificationItemResponse(
                 id = row.id,
                 title = row.title,
-                message = row.message,
+                message = row.message ?: row.body.orEmpty(),
                 type = row.type,
                 imageUrl = row.imageUrl,
                 actionLabel = row.actionLabel,
@@ -85,4 +91,8 @@ data class NotificationStatusResponse(
 data class NotificationMutationResponse(
     val unreadCount: Int,
     val notifications: List<NotificationStatusResponse>
+)
+
+data class NotificationBroadcastResponse(
+    val createdCount: Int
 )
