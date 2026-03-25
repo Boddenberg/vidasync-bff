@@ -36,7 +36,7 @@ GET /notifications
       "title": "Resposta da equipe",
       "message": "Respondemos seu feedback.",
       "type": "INFO",
-      "imageUrl": null,
+      "imageUrl": "https://cdn.exemplo.com/notificacoes/feedback.jpg",
       "actionLabel": "Abrir feedback",
       "actionRoute": "/feedback",
       "readAt": null,
@@ -70,6 +70,7 @@ GET /notifications
 - `unreadCount` considera apenas notificacoes com `readAt == null` e `deleted == false`
 - a lista pode conter notificacoes deletadas para preservar historico no cliente
 - o frontend deve esconder itens com `deleted == true`
+- quando `imageUrl` vier preenchido, o frontend pode renderizar a imagem da notificacao
 
 ## 2. Marcar como lida
 
@@ -180,3 +181,90 @@ A tabela usada pelo backend e `notifications`, com os campos principais:
 - `updated_at`
 
 O SQL idempotente para criar ou evoluir a tabela foi adicionado em `supabase-migrations.sql`.
+
+## 5. Publicar notificacao para um usuario
+
+Essa rota e interna. Ela nao deve ser chamada pelo app cliente.
+
+```http
+POST /internal/admin/notifications
+X-User-Id: <actor-user-id>
+X-Internal-Api-Key: <internal-api-key>
+Content-Type: application/json
+```
+
+### Body
+
+```json
+{
+  "userId": "uuid-do-usuario",
+  "title": "Resposta da equipe",
+  "message": "Respondemos seu feedback.",
+  "type": "INFO",
+  "imageUrl": "https://cdn.exemplo.com/notificacoes/feedback.jpg",
+  "actionLabel": "Abrir feedback",
+  "actionRoute": "/feedback"
+}
+```
+
+### Resposta
+
+```json
+{
+  "notification": {
+    "id": "uuid-1",
+    "title": "Resposta da equipe",
+    "message": "Respondemos seu feedback.",
+    "type": "INFO",
+    "imageUrl": "https://cdn.exemplo.com/notificacoes/feedback.jpg",
+    "actionLabel": "Abrir feedback",
+    "actionRoute": "/feedback",
+    "readAt": null,
+    "deleted": false,
+    "deletedAt": null,
+    "createdAt": "2026-03-25T12:00:00.000Z",
+    "date": "2026-03-25",
+    "time": "12:00:00"
+  }
+}
+```
+
+## 6. Publicar notificacao para todos os usuarios
+
+Essa rota e interna. Ela cria uma linha por usuario na tabela `notifications`.
+
+```http
+POST /internal/admin/notifications/broadcast
+X-User-Id: <actor-user-id>
+X-Internal-Api-Key: <internal-api-key>
+Content-Type: application/json
+```
+
+### Body
+
+```json
+{
+  "title": "Comunicado geral",
+  "message": "Hoje teremos manutencao programada.",
+  "type": "WARNING",
+  "imageUrl": "https://cdn.exemplo.com/notificacoes/manutencao.jpg",
+  "actionLabel": null,
+  "actionRoute": null
+}
+```
+
+### Resposta
+
+```json
+{
+  "createdCount": 42
+}
+```
+
+### Regras
+
+- as rotas internas exigem `X-User-Id` para auditoria
+- se `INTERNAL_ADMIN_API_KEY` estiver configurada, `X-Internal-Api-Key` precisa bater
+- `imageUrl` e opcional, mas quando informado o backend persiste e devolve no `GET /notifications`
+- `actionLabel` e `actionRoute` devem ser enviados juntos
+- no broadcast, o backend busca todos os `user_id` em `user_profiles`
