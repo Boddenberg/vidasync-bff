@@ -4,6 +4,7 @@ import com.vidasync_bff.dto.request.UpdateNotificationsRequest
 import com.vidasync_bff.service.NotificationService
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -71,6 +72,24 @@ class NotificationController(
             ResponseEntity.badRequest().body(mapOf("error" to e.message))
         } catch (e: Exception) {
             log.error("POST /notifications/delete -> 500 | error={}", e.message, e)
+            ResponseEntity.internalServerError().body(mapOf("error" to e.message))
+        }
+    }
+
+    @DeleteMapping
+    fun deleteAll(
+        @RequestHeader("X-User-Id") userId: String
+    ): ResponseEntity<Any> {
+        log.info("DELETE /notifications | userId={}", userId)
+        return try {
+            val result = notificationService.deleteAll(userId)
+            log.info("DELETE /notifications -> 200 | userId={}, deletedCount={}", userId, result.deletedCount)
+            ResponseEntity.ok(result)
+        } catch (e: IllegalArgumentException) {
+            log.warn("DELETE /notifications -> 400 | error={}", e.message)
+            ResponseEntity.badRequest().body(mapOf("error" to e.message))
+        } catch (e: Exception) {
+            log.error("DELETE /notifications -> 500 | error={}", e.message, e)
             ResponseEntity.internalServerError().body(mapOf("error" to e.message))
         }
     }

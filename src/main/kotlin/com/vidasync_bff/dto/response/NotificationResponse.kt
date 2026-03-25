@@ -93,6 +93,10 @@ data class NotificationMutationResponse(
     val notifications: List<NotificationStatusResponse>
 )
 
+data class NotificationDeleteAllResponse(
+    val deletedCount: Int
+)
+
 data class NotificationBroadcastResponse(
     val createdCount: Int
 )

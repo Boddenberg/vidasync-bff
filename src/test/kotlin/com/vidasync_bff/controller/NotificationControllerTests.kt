@@ -2,6 +2,7 @@ package com.vidasync_bff.controller
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.vidasync_bff.dto.request.UpdateNotificationsRequest
+import com.vidasync_bff.dto.response.NotificationDeleteAllResponse
 import com.vidasync_bff.dto.response.NotificationItemResponse
 import com.vidasync_bff.dto.response.NotificationMutationResponse
 import com.vidasync_bff.dto.response.NotificationStatusResponse
@@ -12,6 +13,7 @@ import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -135,6 +137,21 @@ class NotificationControllerTests {
             jsonPath("$.notifications[0].id") { value("notif-1") }
             jsonPath("$.notifications[0].deleted") { value(true) }
             jsonPath("$.notifications[0].deletedAt") { value("2026-03-15T16:30:00.000Z") }
+        }
+    }
+
+    @Test
+    fun `deve retornar 200 no delete all quando service responder com sucesso`() {
+        val response = NotificationDeleteAllResponse(deletedCount = 3)
+
+        `when`(notificationService.deleteAll("user-1")).thenReturn(response)
+
+        mockMvc.delete("/notifications") {
+            header("X-User-Id", "user-1")
+        }.andExpect {
+            status { isOk() }
+            content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
+            jsonPath("$.deletedCount") { value(3) }
         }
     }
 

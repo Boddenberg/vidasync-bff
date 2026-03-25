@@ -5,6 +5,7 @@ import com.vidasync_bff.dto.request.PublishNotificationBroadcastRequest
 import com.vidasync_bff.dto.request.PublishNotificationToUserRequest
 import com.vidasync_bff.dto.request.UpdateNotificationsRequest
 import com.vidasync_bff.dto.response.NotificationBroadcastResponse
+import com.vidasync_bff.dto.response.NotificationDeleteAllResponse
 import com.vidasync_bff.dto.response.NotificationItemResponse
 import com.vidasync_bff.dto.response.NotificationMutationResponse
 import com.vidasync_bff.dto.response.NotificationStatusResponse
@@ -190,6 +191,29 @@ class NotificationService(
             unreadCount = loadUnreadActiveRows(normalizedUserId).size,
             notifications = resultRows.map(NotificationStatusResponse::from)
         )
+    }
+
+    fun deleteAll(userId: String): NotificationDeleteAllResponse {
+        val normalizedUserId = normalizeUserId(userId)
+        log.info("Excluindo notificacoes fisicamente: userId={}", normalizedUserId)
+
+        val deletedCount = loadAllRows(normalizedUserId).size
+        if (deletedCount == 0) {
+            return NotificationDeleteAllResponse(deletedCount = 0)
+        }
+
+        supabaseClient.delete(
+            tableName,
+            mapOf("user_id" to "eq.$normalizedUserId")
+        )
+
+        log.info(
+            "Exclusao fisica de notificacoes concluida: userId={}, deletedCount={}",
+            normalizedUserId,
+            deletedCount
+        )
+
+        return NotificationDeleteAllResponse(deletedCount = deletedCount)
     }
 
     private fun updateRows(
