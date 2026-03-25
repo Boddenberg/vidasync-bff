@@ -23,21 +23,19 @@ class InternalAdminNotificationsController(
 
     @PostMapping
     fun publishToUser(
-        @RequestHeader("X-User-Id") createdBy: String,
         @RequestHeader("X-Internal-Api-Key", required = false) internalApiKey: String?,
         @RequestBody body: PublishNotificationToUserRequest
     ): ResponseEntity<Any> {
         log.info(
-            "POST /internal/admin/notifications | actorUserId={}, targetUserId={}, type={}",
-            createdBy,
+            "POST /internal/admin/notifications | targetUserId={}, type={}",
             body.userId,
             body.type
         )
         return try {
-            val result = notificationService.publishToUser(createdBy, internalApiKey, body)
+            val result = notificationService.publishToUser(internalApiKey, body)
             log.info(
-                "POST /internal/admin/notifications -> 201 | actorUserId={}, notificationId={}",
-                createdBy,
+                "POST /internal/admin/notifications -> 201 | targetUserId={}, notificationId={}",
+                body.userId,
                 result.id
             )
             ResponseEntity.status(HttpStatus.CREATED).body(mapOf("notification" to result))

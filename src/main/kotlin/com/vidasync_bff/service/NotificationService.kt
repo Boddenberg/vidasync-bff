@@ -82,11 +82,10 @@ class NotificationService(
     }
 
     fun publishToUser(
-        createdBy: String,
         providedInternalApiKey: String?,
         request: PublishNotificationToUserRequest
     ): NotificationItemResponse {
-        validateInternalAccess(createdBy, providedInternalApiKey)
+        validateInternalApiKey(providedInternalApiKey)
 
         val targetUserId = normalizeRequiredField(request.userId, "userId obrigatorio")
         val payload = normalizePayload(
@@ -101,8 +100,7 @@ class NotificationService(
         ensureUserExists(targetUserId)
 
         log.info(
-            "Publicando notificacao para usuario: actorUserId={}, targetUserId={}, type={}",
-            createdBy.trim(),
+            "Publicando notificacao para usuario: targetUserId={}, type={}",
             targetUserId,
             payload.type
         )
@@ -332,16 +330,20 @@ class NotificationService(
         return normalized
     }
 
-    private fun validateInternalAccess(actorUserId: String, providedInternalApiKey: String?) {
-        if (actorUserId.trim().isBlank()) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria")
-        }
+    private fun validateInternalApiKey(providedInternalApiKey: String?) {
         if (internalAdminApiKey.isBlank()) {
             return
         }
         if (providedInternalApiKey.isNullOrBlank() || providedInternalApiKey != internalAdminApiKey) {
             throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida")
         }
+    }
+
+    private fun validateInternalAccess(actorUserId: String, providedInternalApiKey: String?) {
+        if (actorUserId.trim().isBlank()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria")
+        }
+        validateInternalApiKey(providedInternalApiKey)
     }
 
     private fun ensureUserExists(userId: String) {

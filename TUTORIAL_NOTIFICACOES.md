@@ -188,7 +188,6 @@ Essa rota e interna. Ela nao deve ser chamada pelo app cliente.
 
 ```http
 POST /internal/admin/notifications
-X-User-Id: <actor-user-id>
 X-Internal-Api-Key: <internal-api-key>
 Content-Type: application/json
 ```
@@ -206,6 +205,8 @@ Content-Type: application/json
   "actionRoute": "/feedback"
 }
 ```
+
+O `userId` do usuario destino deve ser enviado apenas no body.
 
 ### Resposta
 

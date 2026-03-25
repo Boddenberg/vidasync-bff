@@ -51,10 +51,9 @@ class InternalAdminNotificationsControllerTests {
             time = "12:00:00"
         )
 
-        `when`(notificationService.publishToUser("admin-1", "secret-key", request)).thenReturn(response)
+        `when`(notificationService.publishToUser("secret-key", request)).thenReturn(response)
 
         mockMvc.post("/internal/admin/notifications") {
-            header("X-User-Id", "admin-1")
             header("X-Internal-Api-Key", "secret-key")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(request)
@@ -99,11 +98,10 @@ class InternalAdminNotificationsControllerTests {
             message = "Teste"
         )
 
-        `when`(notificationService.publishToUser("admin-1", "wrong-key", request))
+        `when`(notificationService.publishToUser("wrong-key", request))
             .thenThrow(ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida"))
 
         mockMvc.post("/internal/admin/notifications") {
-            header("X-User-Id", "admin-1")
             header("X-Internal-Api-Key", "wrong-key")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(request)
@@ -111,6 +109,42 @@ class InternalAdminNotificationsControllerTests {
             status { isUnauthorized() }
             content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
             jsonPath("$.error") { value("internal api key invalida") }
+        }
+    }
+
+    @Test
+    fun `deve publicar para usuario sem exigir header x user id`() {
+        val request = PublishNotificationToUserRequest(
+            userId = "user-1",
+            title = "Resposta da equipe",
+            message = "Respondemos seu feedback."
+        )
+        val response = NotificationItemResponse(
+            id = "notif-2",
+            title = "Resposta da equipe",
+            message = "Respondemos seu feedback.",
+            type = "INFO",
+            imageUrl = null,
+            actionLabel = null,
+            actionRoute = null,
+            readAt = null,
+            deleted = false,
+            deletedAt = null,
+            createdAt = "2026-03-25T12:05:00.000Z",
+            date = "2026-03-25",
+            time = "12:05:00"
+        )
+
+        `when`(notificationService.publishToUser("secret-key", request)).thenReturn(response)
+
+        mockMvc.post("/internal/admin/notifications") {
+            header("X-Internal-Api-Key", "secret-key")
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(request)
+        }.andExpect {
+            status { isCreated() }
+            content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
+            jsonPath("$.notification.id") { value("notif-2") }
         }
     }
 
