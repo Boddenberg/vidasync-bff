@@ -42,4 +42,4 @@ out/
 ### Environment ###
 .env
 .env.properties
-
+supabase/.temp/
