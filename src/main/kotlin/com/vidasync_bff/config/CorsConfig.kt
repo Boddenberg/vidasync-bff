@@ -22,7 +22,7 @@ class CorsConfig(
             .allowedOriginPatterns(*allowedOriginPatterns.toTypedArray())
             .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
             .allowedHeaders("*")
-            .exposedHeaders("X-Trace-Id")
+            .exposedHeaders("X-Request-ID", "X-Trace-Id")
             .maxAge(3600)
     }
 }

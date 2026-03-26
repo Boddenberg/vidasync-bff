@@ -1,5 +1,7 @@
 package com.vidasync_bff.integration.aigateway.translator
 
+import com.vidasync_bff.dto.ai.AIGatewayOpenAIChatResponse
+import com.vidasync_bff.integration.aigateway.request.AIGatewayChatIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eTemporarioIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
@@ -93,5 +95,37 @@ class AIGatewayIntegrationTranslatorTests {
         assertEquals(true, integrationResponse.resultado?.get("ok"))
         assertFalse(integrationResponse.warnings.isNullOrEmpty())
         assertEquals("trace-e2e-456", e2ePayload["trace_id"])
+    }
+
+    @Test
+    fun `deve traduzir request e resposta de chat preservando conversation id`() {
+        TraceContext.put("trace-chat-mdc")
+
+        val feignRequest = translator.toChatFeignRequest(
+            AIGatewayChatIntegrationRequest(
+                prompt = "preciso beber mais agua?",
+                conversationId = "conv-abc"
+            )
+        )
+        val integrationResponse = translator.toChatIntegrationResponse(
+            AIGatewayOpenAIChatResponse(
+                model = "gpt-4o-mini",
+                response = "Sim, e importante.",
+                conversationId = "conv-abc",
+                intencaoDetectada = mapOf("intencao" to "conversa_geral", "confianca" to 0.55),
+                roteamento = mapOf("precisa_revisao" to false, "warnings" to emptyList<String>()),
+                memoria = mapOf("total_turnos" to 2),
+                traceId = "trace-chat-1"
+            )
+        )
+
+        assertEquals("preciso beber mais agua?", feignRequest.prompt)
+        assertEquals("conv-abc", feignRequest.conversationId)
+        assertEquals("trace-chat-mdc", feignRequest.traceId)
+        assertEquals("conv-abc", integrationResponse.conversationId)
+        assertEquals("gpt-4o-mini", integrationResponse.model)
+        assertEquals("conversa_geral", integrationResponse.intencaoDetectada?.get("intencao"))
+        assertEquals(2, integrationResponse.memoria?.get("total_turnos"))
+        assertEquals("trace-chat-1", integrationResponse.traceId)
     }
 }

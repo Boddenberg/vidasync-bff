@@ -8,6 +8,12 @@ data class AIGatewayRouteIntegrationRequest(
     val metadados: Map<String, Any?> = mapOf("origem" to "vidasync-bff")
 )
 
+data class AIGatewayChatIntegrationRequest(
+    val prompt: String,
+    val conversationId: String? = null,
+    val traceId: String? = null
+)
+
 data class AIGatewayPipelinePlanoImagemIntegrationRequest(
     val imagemUrl: String,
     val contexto: String,

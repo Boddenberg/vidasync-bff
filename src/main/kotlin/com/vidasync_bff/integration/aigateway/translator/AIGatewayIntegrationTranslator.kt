@@ -1,6 +1,9 @@
 package com.vidasync_bff.integration.aigateway.translator
 
+import com.vidasync_bff.dto.ai.AIGatewayOpenAIChatResponse
 import com.vidasync_bff.dto.ai.AIGatewayRouteResponse
+import com.vidasync_bff.integration.aigateway.request.AIGatewayChatFeignRequest
+import com.vidasync_bff.integration.aigateway.request.AIGatewayChatIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasFeignRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eTemporarioFeignRequest
@@ -9,6 +12,7 @@ import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImag
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteFeignRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayFeignResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 import com.vidasync_bff.observability.TraceContext
@@ -33,6 +37,14 @@ class AIGatewayIntegrationTranslator {
             idioma = request.idioma,
             payload = request.payload,
             metadados = request.metadados
+        )
+    }
+
+    fun toChatFeignRequest(request: AIGatewayChatIntegrationRequest): AIGatewayChatFeignRequest {
+        return AIGatewayChatFeignRequest(
+            prompt = request.prompt,
+            conversationId = request.conversationId,
+            traceId = resolveTraceId(request.traceId)
         )
     }
 
@@ -117,6 +129,18 @@ class AIGatewayIntegrationTranslator {
             resultado = response.resultado,
             caloriasTexto = response.caloriasTexto,
             erro = response.erro
+        )
+    }
+
+    fun toChatIntegrationResponse(response: AIGatewayOpenAIChatResponse): AIGatewayChatIntegrationResponse {
+        return AIGatewayChatIntegrationResponse(
+            model = response.model,
+            response = response.response,
+            conversationId = response.conversationId,
+            intencaoDetectada = response.intencaoDetectada,
+            roteamento = response.roteamento,
+            memoria = response.memoria,
+            traceId = response.traceId
         )
     }
 }

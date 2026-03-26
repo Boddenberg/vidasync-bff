@@ -8,7 +8,7 @@ http://localhost:8080
 
 ## Contrato de dominio (obrigatorio)
 
-- O app deve chamar somente rotas do BFF (`/nutrition`, `/meals`, `/favorites`, `/auth`).
+- O app deve chamar somente rotas do BFF (`/nutrition`, `/meals`, `/favorites`, `/auth`, `/chat`).
 - O app nao deve chamar a camada de agentes diretamente.
 - O BFF e o unico ponto de orquestracao de IA para o app.
 
@@ -23,6 +23,108 @@ Campos para usar nessa tela:
 - `ingredients[].precisa_revisao`: destaca itens individuais.
 - `ingredients[].warnings`: explica o motivo da revisao por item.
 - `trace_id`: usar para suporte/troubleshooting.
+
+## Chat conversacional com o agente
+
+Use esta rota quando a tela precisar conversar com o agente de IA sem chamar a camada de IA diretamente.
+
+```
+POST /chat
+Content-Type: application/json
+```
+
+### Body
+
+```json
+{
+  "prompt": "preciso beber mais agua?",
+  "conversationId": "opcional-para-continuar-o-mesmo-chat"
+}
+```
+
+| Campo | Obrigatorio | Observacao |
+| --- | --- | --- |
+| `prompt` | ✅ | Mensagem atual do usuario. |
+| `conversationId` | ❌ | Reenvie o valor retornado pela API para manter contexto entre turnos. |
+
+### Resposta (200)
+
+```json
+{
+  "response": "Sim. Uma meta pratica e entre 2 e 3 litros por dia.",
+  "model": "gpt-4o-mini",
+  "conversationId": "0105e71ede0e4a4cb1b48557ed6ff89c",
+  "intent": "conversa_geral",
+  "confidence": 0.55,
+  "needsReview": false,
+  "warnings": [],
+  "memory": {
+    "totalTurns": 4,
+    "shortTermTurns": 4,
+    "summarizedTurns": 0,
+    "hasSummary": false,
+    "updatedAt": "2026-03-26T05:25:03.465526Z"
+  },
+  "disclaimer": "Informacao geral. Para orientacao personalizada, consulte um nutricionista.",
+  "traceId": "e5bc8b4d1c7f4b8e8d2ec5edaf8f14b9"
+}
+```
+
+### Como o front deve chamar
+
+- No primeiro turno, envie apenas `prompt`.
+- Guarde `conversationId` no estado da tela.
+- Nos turnos seguintes, envie `prompt` + `conversationId`.
+- Para reiniciar a conversa, limpe o `conversationId`.
+- Se o app ja envia `X-User-Id` globalmente, pode continuar enviando. Essa rota aceita o header, mas nao exige.
+- Para troubleshooting, o front pode ler o header `X-Request-ID` da resposta ou usar `traceId` do body.
+
+### Exemplo fetch
+
+```javascript
+const res = await fetch(`${BASE_URL}/chat`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId
+  },
+  body: JSON.stringify({
+    prompt: inputValue,
+    conversationId: currentConversationId || undefined
+  })
+});
+
+const data = await res.json();
+
+setMessages((prev) => [
+  ...prev,
+  { role: 'assistant', content: data.response }
+]);
+setCurrentConversationId(data.conversationId);
+```
+
+### Exemplo curl
+
+```bash
+curl --request POST \
+  --url http://localhost:8080/chat \
+  --header 'Content-Type: application/json' \
+  --data '{
+  "prompt": "preciso beber mais água?"
+}'
+```
+
+### Exemplo curl continuando a mesma conversa
+
+```bash
+curl --request POST \
+  --url http://localhost:8080/chat \
+  --header 'Content-Type: application/json' \
+  --data '{
+  "prompt": "e quanto por dia?",
+  "conversationId": "0105e71ede0e4a4cb1b48557ed6ff89c"
+}'
+```
 
 ---
 

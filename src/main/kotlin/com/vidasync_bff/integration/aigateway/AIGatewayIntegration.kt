@@ -1,12 +1,16 @@
 package com.vidasync_bff.integration.aigateway
 
+import com.vidasync_bff.integration.aigateway.request.AIGatewayChatIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eTemporarioIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 
 interface AIGatewayIntegration {
+    fun chat(request: AIGatewayChatIntegrationRequest): AIGatewayChatIntegrationResponse
+
     fun route(request: AIGatewayRouteIntegrationRequest): AIGatewayIntegrationResponse
 
     fun pipelinePlanoImagem(request: AIGatewayPipelinePlanoImagemIntegrationRequest): AIGatewayIntegrationResponse

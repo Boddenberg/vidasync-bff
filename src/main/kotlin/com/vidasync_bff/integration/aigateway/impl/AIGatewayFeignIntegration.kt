@@ -2,11 +2,13 @@ package com.vidasync_bff.integration.aigateway.impl
 
 import com.vidasync_bff.integration.aigateway.AIGatewayIntegration
 import com.vidasync_bff.integration.aigateway.AIGatewayIntegrationException
+import com.vidasync_bff.integration.aigateway.request.AIGatewayChatIntegrationRequest
 import com.vidasync_bff.integration.aigateway.feign.AIGatewayFeignClient
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eTemporarioIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 import com.vidasync_bff.integration.aigateway.translator.AIGatewayIntegrationTranslator
 import org.slf4j.LoggerFactory
@@ -33,6 +35,75 @@ class AIGatewayFeignIntegration(
     private val planoImagemPath = "$agentesBasePath/pipeline-plano-imagem"
     private val planoE2eTemporarioPath = "$agentesBasePath/pipeline-plano-e2e-temporario"
     private val fotoCaloriasPath = "$agentesBasePath/pipeline-foto-calorias"
+
+    override fun chat(request: AIGatewayChatIntegrationRequest): AIGatewayChatIntegrationResponse {
+        val resolvedTraceId = translator.resolveTraceId(request.traceId)
+        val payloadKeys = buildList {
+            add("prompt")
+            if (!request.conversationId.isNullOrBlank()) add("conversation_id")
+            if (!resolvedTraceId.isNullOrBlank()) add("trace_id")
+        }
+        val startedNs = System.nanoTime()
+        log.info(
+            "ai_gateway.request provider=feign trace_id={} operation={} path={} payload_keys={}",
+            resolvedTraceId,
+            "openai_chat",
+            "/v1/openai/chat",
+            payloadKeys
+        )
+
+        return try {
+            val response = feignClient.chat(
+                request = translator.toChatFeignRequest(request.copy(traceId = resolvedTraceId)),
+                traceId = resolvedTraceId
+            )
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            val warnings = (response.roteamento?.get("warnings") as? List<*>)?.size ?: 0
+            log.info(
+                "ai_gateway.response provider=feign trace_id={} operation={} path={} response_chars={} warnings={} duration_ms={}",
+                response.traceId ?: resolvedTraceId,
+                "openai_chat",
+                "/v1/openai/chat",
+                response.response?.length ?: 0,
+                warnings,
+                String.format(Locale.US, "%.4f", durationMs)
+            )
+            response
+        } catch (e: AIGatewayIntegrationException) {
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            val timeout = isTimeoutFailure(e)
+            log.error(
+                "ai_gateway.error provider=feign trace_id={} operation={} path={} status_code={} timeout={} duration_ms={} body={}",
+                resolvedTraceId,
+                "openai_chat",
+                "/v1/openai/chat",
+                e.statusCode,
+                timeout,
+                String.format(Locale.US, "%.4f", durationMs),
+                e.responseBody,
+                e
+            )
+            throw e
+        } catch (e: Exception) {
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            val timeout = isTimeoutFailure(e)
+            log.error(
+                "ai_gateway.error provider=feign trace_id={} operation={} path={} timeout={} duration_ms={} error_type={} error_message={}",
+                resolvedTraceId,
+                "openai_chat",
+                "/v1/openai/chat",
+                timeout,
+                String.format(Locale.US, "%.4f", durationMs),
+                e::class.java.simpleName,
+                e.message,
+                e
+            )
+            throw AIGatewayIntegrationException(
+                message = "Falha ao chamar AI Gateway em openai_chat: ${e.message}",
+                cause = e
+            )
+        }
+    }
 
     override fun route(request: AIGatewayRouteIntegrationRequest): AIGatewayIntegrationResponse {
         val resolvedTraceId = translator.resolveTraceId(request.traceId)

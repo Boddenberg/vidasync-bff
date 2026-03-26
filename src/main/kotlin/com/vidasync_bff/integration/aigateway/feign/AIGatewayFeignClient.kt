@@ -1,9 +1,11 @@
 package com.vidasync_bff.integration.aigateway.feign
 
+import com.vidasync_bff.integration.aigateway.request.AIGatewayChatFeignRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasFeignRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eTemporarioFeignRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemFeignRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteFeignRequest
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayFeignResponse
 import com.vidasync_bff.observability.TraceContext
 import org.springframework.cloud.openfeign.FeignClient
@@ -18,6 +20,15 @@ import org.springframework.web.bind.annotation.RequestHeader
     configuration = [AIGatewayFeignClientConfiguration::class]
 )
 interface AIGatewayFeignClient {
+
+    @PostMapping(
+        value = ["/v1/openai/chat"],
+        consumes = [MediaType.APPLICATION_JSON_VALUE]
+    )
+    fun chat(
+        @RequestBody request: AIGatewayChatFeignRequest,
+        @RequestHeader(value = TraceContext.TRACE_HEADER, required = false) traceId: String? = null
+    ): AIGatewayChatIntegrationResponse
 
     @PostMapping(
         value = ["/ai/router"],

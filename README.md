@@ -77,6 +77,7 @@ src/main/kotlin/com/vidasync_bff/
 |   `-- UserContext.kt
 |-- controller/
 |   |-- AuthController.kt
+|   |-- ChatController.kt
 |   |-- FavoriteController.kt
 |   |-- FeedbackController.kt
 |   |-- HealthController.kt
@@ -97,6 +98,7 @@ src/main/kotlin/com/vidasync_bff/
 |   `-- TraceContext.kt
 |-- service/
 |   |-- AuthService.kt
+|   |-- ChatService.kt
 |   |-- FavoriteService.kt
 |   |-- FeedbackService.kt
 |   |-- IngredientCacheService.kt
@@ -118,6 +120,7 @@ src/main/kotlin/com/vidasync_bff/
 | Metrics | `GET /metrics` | sem service dedicado | nenhuma |
 | Upload | `POST /uploads/presign` | `UploadService` | Supabase Storage |
 | Auth | `/auth/signup`, `/auth/login`, `/auth/profile`, `/auth/profile/username`, `/auth/profile/password` | `AuthService` | Supabase REST, Supabase Storage |
+| Chat | `POST /chat` | `ChatService` | AI Gateway |
 | Nutrition | `POST /nutrition/calories` | `NutritionService` | AI Gateway, Supabase REST, Supabase Storage |
 | Meals | `/meals` e derivados | `MealService` | Supabase REST, Supabase Storage, NutritionService |
 | Favorites | `/favorites` | `FavoriteService` | Supabase REST, Supabase Storage |

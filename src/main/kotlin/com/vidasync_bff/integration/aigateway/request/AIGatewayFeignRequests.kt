@@ -12,6 +12,14 @@ data class AIGatewayRouteFeignRequest(
     val metadados: Map<String, Any?> = emptyMap()
 )
 
+data class AIGatewayChatFeignRequest(
+    val prompt: String,
+    @JsonProperty("conversation_id")
+    val conversationId: String? = null,
+    @JsonProperty("trace_id")
+    val traceId: String? = null
+)
+
 data class AIGatewayPipelinePlanoImagemFeignRequest(
     @JsonProperty("imagem_url")
     val imagemUrl: String,

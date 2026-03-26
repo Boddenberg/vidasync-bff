@@ -1,5 +1,7 @@
 package com.vidasync_bff.client
 
+import com.vidasync_bff.dto.ai.AIGatewayOpenAIChatRequest
+import com.vidasync_bff.dto.ai.AIGatewayOpenAIChatResponse
 import com.vidasync_bff.dto.ai.AIGatewayRouteRequest
 import com.vidasync_bff.dto.ai.AIGatewayRouteResponse
 import com.vidasync_bff.observability.TraceContext
@@ -26,6 +28,26 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
     private val planoImagemPath = "$agentesBasePath/pipeline-plano-imagem"
     private val planoE2eTemporarioPath = "$agentesBasePath/pipeline-plano-e2e-temporario"
     private val fotoCaloriasPath = "$agentesBasePath/pipeline-foto-calorias"
+    private val openAiChatPath = "/v1/openai/chat"
+
+    fun chat(
+        prompt: String,
+        conversationId: String? = null,
+        traceId: String? = null
+    ): AIGatewayOpenAIChatResponse {
+        val resolvedTraceId = traceId?.takeIf { it.isNotBlank() } ?: TraceContext.current()
+        val request = AIGatewayOpenAIChatRequest(
+            prompt = prompt,
+            conversationId = conversationId?.takeIf { it.isNotBlank() },
+            traceId = resolvedTraceId
+        )
+        return executeChatPost(
+            path = openAiChatPath,
+            operation = "openai_chat",
+            traceId = resolvedTraceId,
+            body = request
+        )
+    }
 
     fun route(
         contexto: String,
@@ -143,6 +165,90 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
                 path,
                 response.status,
                 response.warnings?.size ?: 0,
+                String.format(Locale.US, "%.4f", durationMs),
+            )
+            response
+        } catch (e: HttpStatusCodeException) {
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            val timeout = e.statusCode.value() in listOf(408, 504)
+            val statusCode = e.statusCode.value()
+            val responseBody = e.responseBodyAsString
+            log.error(
+                "ai_gateway.error trace_id={} operation={} path={} status_code={} timeout={} duration_ms={} body={}",
+                traceId,
+                operation,
+                path,
+                statusCode,
+                timeout,
+                String.format(Locale.US, "%.4f", durationMs),
+                responseBody,
+                e,
+            )
+            throw AIGatewayRequestException(
+                message = "Falha ao chamar AI Gateway em $operation: HTTP $statusCode",
+                statusCode = statusCode,
+                responseBody = responseBody,
+                cause = e
+            )
+        } catch (e: Exception) {
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            val timeout = isTimeoutFailure(e)
+            log.error(
+                "ai_gateway.error trace_id={} operation={} path={} timeout={} duration_ms={} error_type={} error_message={}",
+                traceId,
+                operation,
+                path,
+                timeout,
+                String.format(Locale.US, "%.4f", durationMs),
+                e::class.java.simpleName,
+                e.message,
+                e,
+            )
+            throw AIGatewayRequestException(
+                message = "Falha ao chamar AI Gateway em $operation: ${e.message}",
+                cause = e
+            )
+        }
+    }
+
+    private fun executeChatPost(
+        path: String,
+        operation: String,
+        traceId: String?,
+        body: Any
+    ): AIGatewayOpenAIChatResponse {
+        val startedNs = System.nanoTime()
+        log.info(
+            "ai_gateway.request trace_id={} operation={} path={} payload_keys={}",
+            traceId,
+            operation,
+            path,
+            listOf("prompt", "conversation_id", "trace_id")
+        )
+
+        return try {
+            var requestSpec = aiGatewayRestClient.post().uri(path)
+            if (!traceId.isNullOrBlank()) {
+                requestSpec = requestSpec.header(TraceContext.TRACE_HEADER, traceId)
+            }
+            val response = requestSpec
+                .body(body)
+                .retrieve()
+                .body(AIGatewayOpenAIChatResponse::class.java)
+
+            if (response == null) {
+                throw IllegalStateException("Resposta vazia do AI Gateway")
+            }
+
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            val warnings = (response.roteamento?.get("warnings") as? List<*>)?.size ?: 0
+            log.info(
+                "ai_gateway.response trace_id={} operation={} path={} response_chars={} warnings={} duration_ms={}",
+                response.traceId ?: traceId,
+                operation,
+                path,
+                response.response?.length ?: 0,
+                warnings,
                 String.format(Locale.US, "%.4f", durationMs),
             )
             response

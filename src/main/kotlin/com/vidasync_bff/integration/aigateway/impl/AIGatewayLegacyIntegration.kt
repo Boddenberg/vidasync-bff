@@ -3,10 +3,12 @@ package com.vidasync_bff.integration.aigateway.impl
 import com.vidasync_bff.client.AIGatewayClient
 import com.vidasync_bff.integration.aigateway.AIGatewayIntegration
 import com.vidasync_bff.integration.aigateway.AIGatewayIntegrationException
+import com.vidasync_bff.integration.aigateway.request.AIGatewayChatIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eTemporarioIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 import com.vidasync_bff.integration.aigateway.translator.AIGatewayIntegrationTranslator
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -22,6 +24,25 @@ class AIGatewayLegacyIntegration(
     private val legacyClient: AIGatewayClient,
     private val translator: AIGatewayIntegrationTranslator
 ) : AIGatewayIntegration {
+
+    override fun chat(request: AIGatewayChatIntegrationRequest): AIGatewayChatIntegrationResponse {
+        return try {
+            translator.toChatIntegrationResponse(
+                legacyClient.chat(
+                    prompt = request.prompt,
+                    conversationId = request.conversationId,
+                    traceId = translator.resolveTraceId(request.traceId)
+                )
+            )
+        } catch (e: AIGatewayClient.AIGatewayRequestException) {
+            throw AIGatewayIntegrationException(
+                message = e.message ?: "Falha ao chamar AI Gateway",
+                statusCode = e.statusCode,
+                responseBody = e.responseBody,
+                cause = e
+            )
+        }
+    }
 
     override fun route(request: AIGatewayRouteIntegrationRequest): AIGatewayIntegrationResponse {
         return try {
