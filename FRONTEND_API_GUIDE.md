@@ -1473,3 +1473,342 @@ const feedbacks = data.feedbacks;
 4. O painel admin chama `GET /feedback` para listar tudo.
 5. No futuro, voce pode adicionar um endpoint de resposta usando os campos que ja ficaram preparados no banco (`developerResponse`, `respondedAt`, `respondedBy`, `responseSeenAt`).
 
+---
+
+## Metricas do LLM judge
+
+### Endpoint
+
+Use esta rota no painel interno para mostrar cards, graficos e ultimas avaliacoes do judge.
+
+```
+GET /internal/admin/llm-judge/metrics?days=7
+X-User-Id: <admin-user-id>
+X-Internal-Api-Key: <internal-admin-api-key>
+```
+
+### Query params
+
+| Campo | Obrigatorio | Observacao |
+| --- | --- | --- |
+| `days` | nao | janela em dias. Default `7`. Ignorado quando `startDate` e `endDate` vierem preenchidos. |
+| `startDate` | nao | formato `YYYY-MM-DD`. |
+| `endDate` | nao | formato `YYYY-MM-DD`. |
+| `feature` | nao | filtra por feature. |
+| `pipeline` | nao | filtra por pipeline. |
+| `handler` | nao | filtra por handler. |
+| `idioma` | nao | filtra por idioma. |
+| `sourceModel` | nao | filtra por modelo fonte. |
+| `judgeStatus` | nao | `pending`, `completed` ou `failed`. |
+| `judgeDecision` | nao | `approved` ou `rejected`. |
+
+### Resposta (200)
+
+```json
+{
+  "metrics": {
+    "filters": {
+      "startDate": "2026-03-20",
+      "endDate": "2026-03-26",
+      "days": 7,
+      "feature": null,
+      "pipeline": null,
+      "handler": null,
+      "idioma": null,
+      "sourceModel": null,
+      "judgeStatus": null,
+      "judgeDecision": null
+    },
+    "summary": {
+      "totalEvaluations": 42,
+      "completedCount": 35,
+      "pendingCount": 4,
+      "failedCount": 3,
+      "approvedCount": 28,
+      "rejectedCount": 7,
+      "completionRatePercent": 83.33,
+      "failureRatePercent": 7.14,
+      "approvalRatePercent": 80.0,
+      "averageOverallScore": 0.88,
+      "averageSourceDurationMs": 1340.52,
+      "averageJudgeDurationMs": 220.11,
+      "averageSourceTotalTokens": 512.4,
+      "averageJudgeTotalTokens": 144.9,
+      "latestEvaluationAt": "2026-03-26T18:00:00Z",
+      "oldestEvaluationAt": "2026-03-20T09:00:00Z"
+    },
+    "byFeature": [
+      {
+        "key": "nutrition",
+        "totalEvaluations": 22,
+        "completedCount": 20,
+        "pendingCount": 1,
+        "failedCount": 1,
+        "approvedCount": 16,
+        "rejectedCount": 4,
+        "completionRatePercent": 90.91,
+        "failureRatePercent": 4.55,
+        "approvalRatePercent": 80.0,
+        "averageOverallScore": 0.9,
+        "averageSourceDurationMs": 1200.5,
+        "averageJudgeDurationMs": 180.2,
+        "averageSourceTotalTokens": 480.0,
+        "averageJudgeTotalTokens": 120.0
+      }
+    ],
+    "byPipeline": [],
+    "byHandler": [],
+    "byIdioma": [],
+    "bySourceModel": [],
+    "daily": [
+      {
+        "date": "2026-03-26",
+        "totalEvaluations": 6,
+        "completedCount": 5,
+        "pendingCount": 1,
+        "failedCount": 0,
+        "approvedCount": 4,
+        "rejectedCount": 1,
+        "completionRatePercent": 83.33,
+        "failureRatePercent": 0.0,
+        "approvalRatePercent": 80.0,
+        "averageOverallScore": 0.91
+      }
+    ],
+    "topRejectionReasons": [
+      {
+        "key": "falta contexto",
+        "count": 3
+      }
+    ],
+    "recentEvaluations": [
+      {
+        "evaluationId": "eval-123",
+        "createdAt": "2026-03-26T18:00:00Z",
+        "feature": "nutrition",
+        "judgeStatus": "completed",
+        "judgeDecision": "approved",
+        "judgeOverallScore": 0.97,
+        "idioma": "pt-BR",
+        "pipeline": "image",
+        "handler": "calories",
+        "sourceModel": "gpt-4.1-mini",
+        "sourceDurationMs": 1180.0,
+        "judgeDurationMs": 175.0,
+        "sourceTotalTokens": 470,
+        "judgeTotalTokens": 118
+      }
+    ]
+  }
+}
+```
+
+### Como o front pode usar
+
+- `summary` para cards principais
+- `daily` para grafico de linha ou barras
+- `byFeature`, `byPipeline`, `byHandler`, `byIdioma` e `bySourceModel` para rankings e filtros
+- `topRejectionReasons` para heatmap, chips ou tabela de causas
+- `recentEvaluations` para a tabela de ultimas execucoes
+
+### Exemplo fetch
+
+```javascript
+const params = new URLSearchParams({
+  days: '7',
+  feature: selectedFeature || ''
+});
+
+const res = await fetch(`${BASE_URL}/internal/admin/llm-judge/metrics?${params}`, {
+  headers: {
+    'X-User-Id': adminUserId,
+    'X-Internal-Api-Key': internalApiKey
+  }
+});
+
+const data = await res.json();
+const metrics = data.metrics;
+```
+
+---
+
+## Metricas de telemetria do backend
+
+### Endpoint de dashboard
+
+Use esta rota para montar os cards e graficos de custo, tokens e latencia do painel interno.
+
+```
+GET /internal/admin/telemetry/metrics?days=7&agent=nutrition
+X-User-Id: <admin-user-id>
+X-Internal-Api-Key: <internal-admin-api-key>
+```
+
+### Query params
+
+| Campo | Obrigatorio | Observacao |
+| --- | --- | --- |
+| `days` | nao | janela em dias. Default `7`. Ignorado quando `startDate` e `endDate` vierem preenchidos. |
+| `startDate` | nao | formato `YYYY-MM-DD`. |
+| `endDate` | nao | formato `YYYY-MM-DD`. |
+| `agent` | nao | filtra por agente/feature do BFF, por exemplo `chat` ou `nutrition`. |
+| `status` | nao | filtra por `success`, `error` ou `timeout` no endpoint de runs recentes. |
+
+### Resposta de dashboard (200)
+
+```json
+{
+  "metrics": {
+    "filters": {
+      "startDate": "2026-03-20",
+      "endDate": "2026-03-26",
+      "days": 7,
+      "agent": "nutrition",
+      "model": null,
+      "status": null
+    },
+    "summary": {
+      "totalRuns": 28,
+      "successCount": 22,
+      "errorCount": 4,
+      "timeoutCount": 2,
+      "totalCostUsd": 0.0241,
+      "inputTokens": 8200,
+      "outputTokens": 9100,
+      "totalTokens": 17300,
+      "averageDurationMs": 1180.4,
+      "p95DurationMs": 2840.0,
+      "latestRunAt": "2026-03-26T18:00:00Z",
+      "oldestRunAt": "2026-03-20T09:00:00Z"
+    },
+    "daily": [
+      {
+        "dayUtc": "2026-03-26",
+        "runCount": 5,
+        "successCount": 4,
+        "errorCount": 1,
+        "timeoutCount": 0,
+        "totalCostUsd": 0.0042,
+        "inputTokens": 1300,
+        "outputTokens": 1440,
+        "totalTokens": 2740,
+        "averageDurationMs": 990.0,
+        "p95DurationMs": 1220.0
+      }
+    ],
+    "byAgent": [
+      {
+        "agent": "nutrition",
+        "runCount": 18,
+        "successCount": 15,
+        "errorCount": 2,
+        "timeoutCount": 1,
+        "totalCostUsd": 0.017,
+        "totalTokens": 12200,
+        "averageDurationMs": 1090.0,
+        "p95DurationMs": 2410.0
+      }
+    ],
+    "byModel": [
+      {
+        "model": "gpt-4.1-mini",
+        "agent": "nutrition",
+        "llmCallCount": 16,
+        "totalCostUsd": 0.0154,
+        "inputTokens": 5600,
+        "outputTokens": 5900,
+        "totalTokens": 11500,
+        "averageDurationMs": 930.0,
+        "p95DurationMs": 1180.0
+      }
+    ]
+  }
+}
+```
+
+### Endpoint de runs recentes
+
+Use esta rota para preencher a tabela de execucoes recentes.
+
+```
+GET /internal/admin/telemetry/runs?days=7&status=timeout&limit=20
+X-User-Id: <admin-user-id>
+X-Internal-Api-Key: <internal-admin-api-key>
+```
+
+### Resposta de runs (200)
+
+```json
+{
+  "runs": {
+    "filters": {
+      "startDate": "2026-03-20",
+      "endDate": "2026-03-26",
+      "days": 7,
+      "agent": null,
+      "model": null,
+      "status": "timeout"
+    },
+    "limit": 20,
+    "recentRuns": [
+      {
+        "runId": "run-123",
+        "requestId": "req-123",
+        "traceId": "trace-123",
+        "agent": "nutrition",
+        "endpoint": "/nutrition/calories",
+        "httpMethod": "POST",
+        "httpStatus": 504,
+        "status": "timeout",
+        "timeout": true,
+        "durationMs": 3000.0,
+        "totalCostUsd": 0.0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "totalTokens": 0,
+        "llmCallCount": 0,
+        "toolCallCount": 1,
+        "stageEventCount": 4,
+        "errorMessage": "HTTP 504",
+        "startedAt": "2026-03-26T18:10:00Z",
+        "finishedAt": "2026-03-26T18:10:03Z",
+        "requestContext": {
+          "path": "/nutrition/calories"
+        }
+      }
+    ]
+  }
+}
+```
+
+### Como o front pode usar
+
+- `metrics.summary` para cards principais
+- `metrics.daily` para grafico de linha/barras
+- `metrics.byAgent` e `metrics.byModel` para rankings
+- `runs.recentRuns` para tabela de execucoes com filtro por status
+
+### Exemplo fetch
+
+```javascript
+const metricsRes = await fetch(`${BASE_URL}/internal/admin/telemetry/metrics?days=7`, {
+  headers: {
+    'X-User-Id': adminUserId,
+    'X-Internal-Api-Key': internalApiKey
+  }
+});
+
+const metricsData = await metricsRes.json();
+const telemetryMetrics = metricsData.metrics;
+
+const runsRes = await fetch(`${BASE_URL}/internal/admin/telemetry/runs?days=7&limit=20`, {
+  headers: {
+    'X-User-Id': adminUserId,
+    'X-Internal-Api-Key': internalApiKey
+  }
+});
+
+const runsData = await runsRes.json();
+const recentRuns = runsData.runs.recentRuns;
+```
+
