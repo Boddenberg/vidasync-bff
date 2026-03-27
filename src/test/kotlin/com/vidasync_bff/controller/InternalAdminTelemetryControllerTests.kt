@@ -95,7 +95,6 @@ class InternalAdminTelemetryControllerTests {
         `when`(
             telemetryService.getMetrics(
                 "admin-1",
-                "secret-key",
                 7,
                 null,
                 null,
@@ -105,7 +104,6 @@ class InternalAdminTelemetryControllerTests {
 
         mockMvc.get("/internal/admin/telemetry/metrics") {
             header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "secret-key")
             param("days", "7")
             param("agent", "chat")
         }.andExpect {
@@ -121,8 +119,7 @@ class InternalAdminTelemetryControllerTests {
     fun `deve retornar status propagado para runs`() {
         `when`(
             telemetryService.getRecentRuns(
-                "admin-1",
-                "wrong-key",
+                " ",
                 null,
                 null,
                 null,
@@ -130,15 +127,14 @@ class InternalAdminTelemetryControllerTests {
                 null,
                 20
             )
-        ).thenThrow(ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida"))
+        ).thenThrow(ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria"))
 
         mockMvc.get("/internal/admin/telemetry/runs") {
-            header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "wrong-key")
+            header("X-User-Id", " ")
             param("limit", "20")
         }.andExpect {
-            status { isUnauthorized() }
-            jsonPath("$.error") { value("internal api key invalida") }
+            status { isBadRequest() }
+            jsonPath("$.error") { value("header X-User-Id obrigatorio para auditoria") }
         }
     }
 
@@ -184,7 +180,6 @@ class InternalAdminTelemetryControllerTests {
         `when`(
             telemetryService.getRecentRuns(
                 "admin-1",
-                "secret-key",
                 null,
                 null,
                 null,
@@ -196,7 +191,6 @@ class InternalAdminTelemetryControllerTests {
 
         mockMvc.get("/internal/admin/telemetry/runs") {
             header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "secret-key")
             param("limit", "2")
         }.andExpect {
             status { isOk() }

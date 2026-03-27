@@ -12,7 +12,6 @@ import com.vidasync_bff.dto.response.NotificationStatusResponse
 import com.vidasync_bff.dto.response.NotificationsInboxResponse
 import com.vidasync_bff.dto.response.SupabaseNotificationRow
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -22,8 +21,7 @@ import java.time.ZoneOffset
 
 @Service
 class NotificationService(
-    private val supabaseClient: SupabaseClient,
-    @Value("\${internal.admin.api-key:}") private val internalAdminApiKey: String
+    private val supabaseClient: SupabaseClient
 ) {
 
     private val log = LoggerFactory.getLogger(NotificationService::class.java)
@@ -82,10 +80,10 @@ class NotificationService(
     }
 
     fun publishToUser(
-        providedInternalApiKey: String?,
+        createdBy: String,
         request: PublishNotificationToUserRequest
     ): NotificationItemResponse {
-        validateInternalApiKey(providedInternalApiKey)
+        validateInternalAccess(createdBy)
 
         val targetUserId = normalizeRequiredField(request.userId, "userId obrigatorio")
         val payload = normalizePayload(
@@ -117,10 +115,9 @@ class NotificationService(
 
     fun publishToAll(
         createdBy: String,
-        providedInternalApiKey: String?,
         request: PublishNotificationBroadcastRequest
     ): NotificationBroadcastResponse {
-        validateInternalAccess(createdBy, providedInternalApiKey)
+        validateInternalAccess(createdBy)
 
         val payload = normalizePayload(
             title = request.title,
@@ -330,20 +327,10 @@ class NotificationService(
         return normalized
     }
 
-    private fun validateInternalApiKey(providedInternalApiKey: String?) {
-        if (internalAdminApiKey.isBlank()) {
-            return
-        }
-        if (providedInternalApiKey.isNullOrBlank() || providedInternalApiKey != internalAdminApiKey) {
-            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida")
-        }
-    }
-
-    private fun validateInternalAccess(actorUserId: String, providedInternalApiKey: String?) {
+    private fun validateInternalAccess(actorUserId: String) {
         if (actorUserId.trim().isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria")
         }
-        validateInternalApiKey(providedInternalApiKey)
     }
 
     private fun ensureUserExists(userId: String) {

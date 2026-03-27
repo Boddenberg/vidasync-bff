@@ -24,8 +24,7 @@ class InternalAdminUsersController(
     fun cloneUser(
         @PathVariable("id") sourceUserId: String,
         @RequestParam(name = "dry_run", defaultValue = "true") dryRun: Boolean,
-        @RequestHeader("X-User-Id") clonedBy: String,
-        @RequestHeader("X-Internal-Api-Key", required = false) internalApiKey: String?
+        @RequestHeader("X-User-Id") clonedBy: String
     ): ResponseEntity<Any> {
         log.info(
             "POST /internal/admin/users/{}/clone dry_run={} cloned_by={}",
@@ -35,8 +34,7 @@ class InternalAdminUsersController(
             val result = cloneService.cloneUser(
                 sourceUserId = sourceUserId,
                 dryRun = dryRun,
-                clonedBy = clonedBy,
-                providedInternalApiKey = internalApiKey
+                clonedBy = clonedBy
             )
             val status = if (dryRun) HttpStatus.OK else HttpStatus.CREATED
             log.info(

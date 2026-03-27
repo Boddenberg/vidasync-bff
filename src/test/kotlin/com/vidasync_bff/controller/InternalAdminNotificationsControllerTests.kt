@@ -51,10 +51,10 @@ class InternalAdminNotificationsControllerTests {
             time = "12:00:00"
         )
 
-        `when`(notificationService.publishToUser("secret-key", request)).thenReturn(response)
+        `when`(notificationService.publishToUser("admin-1", request)).thenReturn(response)
 
         mockMvc.post("/internal/admin/notifications") {
-            header("X-Internal-Api-Key", "secret-key")
+            header("X-User-Id", "admin-1")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(request)
         }.andExpect {
@@ -76,11 +76,10 @@ class InternalAdminNotificationsControllerTests {
         )
         val response = NotificationBroadcastResponse(createdCount = 42)
 
-        `when`(notificationService.publishToAll("admin-1", "secret-key", request)).thenReturn(response)
+        `when`(notificationService.publishToAll("admin-1", request)).thenReturn(response)
 
         mockMvc.post("/internal/admin/notifications/broadcast") {
             header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "secret-key")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(request)
         }.andExpect {
@@ -98,22 +97,22 @@ class InternalAdminNotificationsControllerTests {
             message = "Teste"
         )
 
-        `when`(notificationService.publishToUser("wrong-key", request))
-            .thenThrow(ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida"))
+        `when`(notificationService.publishToUser(" ", request))
+            .thenThrow(ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria"))
 
         mockMvc.post("/internal/admin/notifications") {
-            header("X-Internal-Api-Key", "wrong-key")
+            header("X-User-Id", " ")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(request)
         }.andExpect {
-            status { isUnauthorized() }
+            status { isBadRequest() }
             content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
-            jsonPath("$.error") { value("internal api key invalida") }
+            jsonPath("$.error") { value("header X-User-Id obrigatorio para auditoria") }
         }
     }
 
     @Test
-    fun `deve publicar para usuario sem exigir header x user id`() {
+    fun `deve publicar para usuario exigindo header x user id`() {
         val request = PublishNotificationToUserRequest(
             userId = "user-1",
             title = "Resposta da equipe",
@@ -135,10 +134,10 @@ class InternalAdminNotificationsControllerTests {
             time = "12:05:00"
         )
 
-        `when`(notificationService.publishToUser("secret-key", request)).thenReturn(response)
+        `when`(notificationService.publishToUser("admin-1", request)).thenReturn(response)
 
         mockMvc.post("/internal/admin/notifications") {
-            header("X-Internal-Api-Key", "secret-key")
+            header("X-User-Id", "admin-1")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(request)
         }.andExpect {
@@ -157,11 +156,10 @@ class InternalAdminNotificationsControllerTests {
 
         doThrow(IllegalArgumentException("title obrigatorio"))
             .`when`(notificationService)
-            .publishToAll("admin-1", "secret-key", request)
+            .publishToAll("admin-1", request)
 
         mockMvc.post("/internal/admin/notifications/broadcast") {
             header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "secret-key")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(request)
         }.andExpect {

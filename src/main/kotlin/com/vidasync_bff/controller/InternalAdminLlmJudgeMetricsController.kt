@@ -22,7 +22,6 @@ class InternalAdminLlmJudgeMetricsController(
     @GetMapping("/metrics")
     fun getMetrics(
         @RequestHeader("X-User-Id") actorUserId: String,
-        @RequestHeader("X-Internal-Api-Key", required = false) internalApiKey: String?,
         @RequestParam(required = false) days: Int?,
         @RequestParam(required = false) startDate: String?,
         @RequestParam(required = false) endDate: String?,
@@ -52,7 +51,6 @@ class InternalAdminLlmJudgeMetricsController(
         return try {
             val result = llmJudgeMetricsService.getMetrics(
                 actorUserId = actorUserId,
-                providedInternalApiKey = internalApiKey,
                 days = days,
                 startDate = startDate,
                 endDate = endDate,

@@ -5,7 +5,6 @@ import com.vidasync_bff.dto.request.CreateFeedbackRequest
 import com.vidasync_bff.dto.response.FeedbackEntryResponse
 import com.vidasync_bff.dto.response.SupabaseFeedbackRow
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -13,8 +12,7 @@ import org.springframework.web.server.ResponseStatusException
 
 @Service
 class FeedbackService(
-    private val supabaseClient: SupabaseClient,
-    @Value("\${internal.admin.api-key:}") private val internalAdminApiKey: String
+    private val supabaseClient: SupabaseClient
 ) {
 
     private val log = LoggerFactory.getLogger(FeedbackService::class.java)
@@ -59,8 +57,8 @@ class FeedbackService(
         return FeedbackEntryResponse.from(saved)
     }
 
-    fun getAll(actorUserId: String, providedInternalApiKey: String?): List<FeedbackEntryResponse> {
-        validateInternalAccess(actorUserId, providedInternalApiKey)
+    fun getAll(actorUserId: String): List<FeedbackEntryResponse> {
+        validateInternalAccess(actorUserId)
 
         log.info("Buscando feedbacks para admin: actorUserId={}", actorUserId)
 
@@ -75,15 +73,9 @@ class FeedbackService(
         return rows.map(FeedbackEntryResponse::from)
     }
 
-    private fun validateInternalAccess(actorUserId: String, providedInternalApiKey: String?) {
+    private fun validateInternalAccess(actorUserId: String) {
         if (actorUserId.trim().isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria")
-        }
-        if (internalAdminApiKey.isBlank()) {
-            return
-        }
-        if (providedInternalApiKey.isNullOrBlank() || providedInternalApiKey != internalAdminApiKey) {
-            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida")
         }
     }
 }

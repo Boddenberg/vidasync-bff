@@ -167,7 +167,7 @@ sequenceDiagram
 | Header | Onde aparece | Obrigatorio? | Finalidade |
 | --- | --- | --- | --- |
 | `X-User-Id` | quase todas as rotas de dados | sim na maioria das rotas autenticadas | identifica o usuario do app |
-| `X-Internal-Api-Key` | rotas internas/admin e listagem admin de feedback | depende da configuracao | protege operacoes internas |
+| `X-Internal-Api-Key` | chamadas internas do BFF para o AI Gateway | nao se aplica ao frontend | header tecnico de integracao entre servicos |
 | `X-Request-ID` | todas as rotas | opcional na entrada, sempre devolvido na saida | correlacao e troubleshooting |
 
 ### Modelo de autenticacao do app
@@ -182,7 +182,7 @@ sequenceDiagram
 - `GET /health`, `GET /metrics`, `POST /auth/signup`, `POST /auth/login` e `POST /nutrition/calories` sao publicos.
 - `POST /chat` aceita `X-User-Id`, mas nao exige.
 - `GET /feedback` e uma rota de painel/admin, apesar do path nao comecar com `/internal`.
-- Algumas rotas internas exigem `X-Internal-Api-Key` apenas se `INTERNAL_ADMIN_API_KEY` estiver configurada.
+- Rotas internas/admin usam `X-User-Id` para auditoria; o frontend nao precisa enviar `X-Internal-Api-Key`.
 
 ### Sanitizacao e seguranca operacional
 
@@ -255,13 +255,13 @@ Tambem evita preview de corpo para conteudos binarios como:
 
 | Metodo | Rota | Auth | Uso principal |
 | --- | --- | --- | --- |
-| `GET` | `/feedback` | `X-User-Id` e `X-Internal-Api-Key` se configurada | lista feedbacks para painel admin |
-| `GET` | `/internal/admin/llm-judge/metrics` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | dashboard de metricas agregadas do llm judge |
-| `GET` | `/internal/admin/telemetry/metrics` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | cards e graficos de custo, tokens e latencia por agente/modelo |
-| `GET` | `/internal/admin/telemetry/runs` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | lista de runs recentes com filtro por status/agente |
-| `POST` | `/internal/admin/notifications` | `X-Internal-Api-Key` se configurada | publica notificacao para um usuario |
-| `POST` | `/internal/admin/notifications/broadcast` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | broadcast para todos os usuarios |
-| `POST` | `/internal/admin/users/{id}/clone?dry_run=true|false` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | clona usuario, refeicoes e favoritos |
+| `GET` | `/feedback` | `X-User-Id` | lista feedbacks para painel admin |
+| `GET` | `/internal/admin/llm-judge/metrics` | `X-User-Id` para auditoria | dashboard de metricas agregadas do llm judge |
+| `GET` | `/internal/admin/telemetry/metrics` | `X-User-Id` para auditoria | cards e graficos de custo, tokens e latencia por agente/modelo |
+| `GET` | `/internal/admin/telemetry/runs` | `X-User-Id` para auditoria | lista de runs recentes com filtro por status/agente |
+| `POST` | `/internal/admin/notifications` | `X-User-Id` para auditoria | publica notificacao para um usuario |
+| `POST` | `/internal/admin/notifications/broadcast` | `X-User-Id` para auditoria | broadcast para todos os usuarios |
+| `POST` | `/internal/admin/users/{id}/clone?dry_run=true|false` | `X-User-Id` para auditoria | clona usuario, refeicoes e favoritos |
 
 ### Notas importantes do catalogo
 
@@ -476,7 +476,7 @@ sequenceDiagram
 
 - `POST /feedback` salva feedback do usuario na tabela `developer_feedback`
 - `GET /feedback` lista tudo para uso administrativo
-- `INTERNAL_ADMIN_API_KEY` protege a listagem se estiver configurada
+- `GET /feedback` exige `X-User-Id` para auditoria
 
 #### Campos mais importantes do feedback
 
@@ -539,7 +539,6 @@ sequenceDiagram
 ```http
 GET /internal/admin/llm-judge/metrics?days=7&feature=nutrition
 X-User-Id: <actor-user-id>
-X-Internal-Api-Key: <internal-api-key>
 ```
 
 #### Filtros suportados
@@ -575,7 +574,6 @@ X-Internal-Api-Key: <internal-api-key>
 GET /internal/admin/telemetry/metrics?days=7&agent=nutrition
 GET /internal/admin/telemetry/runs?days=7&status=timeout&limit=20
 X-User-Id: <actor-user-id>
-X-Internal-Api-Key: <internal-api-key>
 ```
 
 #### O que o backend grava
@@ -722,7 +720,6 @@ O Spring importa:
 | `NUTRITION_CACHE_ENABLED` | nao | `true` | habilita cache de ingredientes |
 | `NUTRITION_CACHE_IMAGE_ONLY_ENABLED` | nao | `false` | permite cache tambem para requests so com imagem |
 | `NUTRITION_AI_FUTURE_TIMEOUT_SECONDS` | nao | `90` | timeout por chamada paralela de IA em nutricao |
-| `INTERNAL_ADMIN_API_KEY` | nao | vazio | protege operacoes internas/admin |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | nao | `http://localhost:*,http://127.0.0.1:*` | CORS para web/local |
 
 ### Exemplo minimo de `.env.properties`
@@ -745,7 +742,6 @@ NUTRITION_CACHE_ENABLED=true
 NUTRITION_CACHE_IMAGE_ONLY_ENABLED=false
 NUTRITION_AI_FUTURE_TIMEOUT_SECONDS=90
 
-INTERNAL_ADMIN_API_KEY=
 CORS_ALLOWED_ORIGIN_PATTERNS=http://localhost:*,http://127.0.0.1:*
 ```
 
@@ -848,7 +844,7 @@ O `CorsConfig`:
 1. Se o frontend recebeu erro estranho, cheque o `X-Request-ID`.
 2. Se o problema envolver IA, procure o mesmo trace nos logs do BFF e do AI Gateway.
 3. Se um fluxo com imagem estiver lento, verifique se o cliente ainda esta mandando base64 em vez de upload assinado.
-4. Se uma rota interna falhar com `401`, confirme `INTERNAL_ADMIN_API_KEY`.
+4. Se uma rota interna/admin falhar, confirme se o `X-User-Id` esta sendo enviado e se o deploy em producao esta atualizado.
 
 ---
 

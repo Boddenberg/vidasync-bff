@@ -22,7 +22,6 @@ class InternalAdminTelemetryController(
     @GetMapping("/metrics")
     fun getMetrics(
         @RequestHeader("X-User-Id") actorUserId: String,
-        @RequestHeader("X-Internal-Api-Key", required = false) internalApiKey: String?,
         @RequestParam(required = false) days: Int?,
         @RequestParam(required = false) startDate: String?,
         @RequestParam(required = false) endDate: String?,
@@ -40,7 +39,6 @@ class InternalAdminTelemetryController(
         return try {
             val result = telemetryService.getMetrics(
                 actorUserId = actorUserId,
-                providedInternalApiKey = internalApiKey,
                 days = days,
                 startDate = startDate,
                 endDate = endDate,
@@ -67,7 +65,6 @@ class InternalAdminTelemetryController(
     @GetMapping("/runs")
     fun getRecentRuns(
         @RequestHeader("X-User-Id") actorUserId: String,
-        @RequestHeader("X-Internal-Api-Key", required = false) internalApiKey: String?,
         @RequestParam(required = false) days: Int?,
         @RequestParam(required = false) startDate: String?,
         @RequestParam(required = false) endDate: String?,
@@ -89,7 +86,6 @@ class InternalAdminTelemetryController(
         return try {
             val result = telemetryService.getRecentRuns(
                 actorUserId = actorUserId,
-                providedInternalApiKey = internalApiKey,
                 days = days,
                 startDate = startDate,
                 endDate = endDate,

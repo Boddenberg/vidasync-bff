@@ -10,7 +10,6 @@ import com.vidasync_bff.dto.response.LlmJudgeMetricsSummaryResponse
 import com.vidasync_bff.dto.response.LlmJudgeRecentEvaluationResponse
 import com.vidasync_bff.dto.response.SupabaseLlmJudgeEvaluationRow
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -24,8 +23,7 @@ import java.time.temporal.ChronoUnit
 
 @Service
 class LlmJudgeMetricsService(
-    private val supabaseClient: SupabaseClient,
-    @Value("\${internal.admin.api-key:}") private val internalAdminApiKey: String
+    private val supabaseClient: SupabaseClient
 ) {
 
     private val log = LoggerFactory.getLogger(LlmJudgeMetricsService::class.java)
@@ -51,7 +49,6 @@ class LlmJudgeMetricsService(
 
     fun getMetrics(
         actorUserId: String,
-        providedInternalApiKey: String?,
         days: Int?,
         startDate: String?,
         endDate: String?,
@@ -63,7 +60,7 @@ class LlmJudgeMetricsService(
         judgeStatus: String?,
         judgeDecision: String?
     ): LlmJudgeMetricsResponse {
-        validateInternalAccess(actorUserId, providedInternalApiKey)
+        validateInternalAccess(actorUserId)
 
         val filters = resolveFilters(
             days = days,
@@ -356,15 +353,9 @@ class LlmJudgeMetricsService(
         return normalizeOptional(value) ?: "nao_informado"
     }
 
-    private fun validateInternalAccess(actorUserId: String, providedInternalApiKey: String?) {
+    private fun validateInternalAccess(actorUserId: String) {
         if (actorUserId.trim().isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria")
-        }
-        if (internalAdminApiKey.isBlank()) {
-            return
-        }
-        if (providedInternalApiKey.isNullOrBlank() || providedInternalApiKey != internalAdminApiKey) {
-            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida")
         }
     }
 

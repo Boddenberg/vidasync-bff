@@ -14,10 +14,7 @@ import kotlin.test.assertEquals
 class NotificationServiceTests {
 
     private val supabaseClient = mock(SupabaseClient::class.java)
-    private val service = NotificationService(
-        supabaseClient = supabaseClient,
-        internalAdminApiKey = ""
-    )
+    private val service = NotificationService(supabaseClient = supabaseClient)
 
     @Test
     fun `deve excluir fisicamente todas as notificacoes do usuario`() {

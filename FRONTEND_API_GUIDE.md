@@ -1401,11 +1401,9 @@ Esse endpoint foi pensado para a area interna de desenvolvedor/admin.
 ```
 GET /feedback
 X-User-Id: <seu-user-id-admin>
-X-Internal-Api-Key: <internal-admin-api-key>
 ```
 
 Importante:
-- Se `INTERNAL_ADMIN_API_KEY` estiver configurada no backend, esse header precisa ser enviado.
 - O retorno ja vem com campos preparados para resposta futura do desenvolvedor.
 
 Resposta (200):
@@ -1454,8 +1452,7 @@ Exemplo fetch:
 ```javascript
 const res = await fetch(`${BASE_URL}/feedback`, {
   headers: {
-    'X-User-Id': adminUserId,
-    'X-Internal-Api-Key': internalApiKey
+    'X-User-Id': adminUserId
   }
 });
 
@@ -1484,7 +1481,6 @@ Use esta rota no painel interno para mostrar cards, graficos e ultimas avaliacoe
 ```
 GET /internal/admin/llm-judge/metrics?days=7
 X-User-Id: <admin-user-id>
-X-Internal-Api-Key: <internal-admin-api-key>
 ```
 
 ### Query params
@@ -1621,8 +1617,7 @@ const params = new URLSearchParams({
 
 const res = await fetch(`${BASE_URL}/internal/admin/llm-judge/metrics?${params}`, {
   headers: {
-    'X-User-Id': adminUserId,
-    'X-Internal-Api-Key': internalApiKey
+    'X-User-Id': adminUserId
   }
 });
 
@@ -1641,7 +1636,6 @@ Use esta rota para montar os cards e graficos de custo, tokens e latencia do pai
 ```
 GET /internal/admin/telemetry/metrics?days=7&agent=nutrition
 X-User-Id: <admin-user-id>
-X-Internal-Api-Key: <internal-admin-api-key>
 ```
 
 ### Query params
@@ -1733,7 +1727,6 @@ Use esta rota para preencher a tabela de execucoes recentes.
 ```
 GET /internal/admin/telemetry/runs?days=7&status=timeout&limit=20
 X-User-Id: <admin-user-id>
-X-Internal-Api-Key: <internal-admin-api-key>
 ```
 
 ### Resposta de runs (200)
@@ -1793,8 +1786,7 @@ X-Internal-Api-Key: <internal-admin-api-key>
 ```javascript
 const metricsRes = await fetch(`${BASE_URL}/internal/admin/telemetry/metrics?days=7`, {
   headers: {
-    'X-User-Id': adminUserId,
-    'X-Internal-Api-Key': internalApiKey
+    'X-User-Id': adminUserId
   }
 });
 
@@ -1803,8 +1795,7 @@ const telemetryMetrics = metricsData.metrics;
 
 const runsRes = await fetch(`${BASE_URL}/internal/admin/telemetry/runs?days=7&limit=20`, {
   headers: {
-    'X-User-Id': adminUserId,
-    'X-Internal-Api-Key': internalApiKey
+    'X-User-Id': adminUserId
   }
 });
 

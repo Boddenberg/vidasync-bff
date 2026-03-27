@@ -23,18 +23,20 @@ class InternalAdminNotificationsController(
 
     @PostMapping
     fun publishToUser(
-        @RequestHeader("X-Internal-Api-Key", required = false) internalApiKey: String?,
+        @RequestHeader("X-User-Id") createdBy: String,
         @RequestBody body: PublishNotificationToUserRequest
     ): ResponseEntity<Any> {
         log.info(
-            "POST /internal/admin/notifications | targetUserId={}, type={}",
+            "POST /internal/admin/notifications | actorUserId={}, targetUserId={}, type={}",
+            createdBy,
             body.userId,
             body.type
         )
         return try {
-            val result = notificationService.publishToUser(internalApiKey, body)
+            val result = notificationService.publishToUser(createdBy, body)
             log.info(
-                "POST /internal/admin/notifications -> 201 | targetUserId={}, notificationId={}",
+                "POST /internal/admin/notifications -> 201 | actorUserId={}, targetUserId={}, notificationId={}",
+                createdBy,
                 body.userId,
                 result.id
             )
@@ -59,7 +61,6 @@ class InternalAdminNotificationsController(
     @PostMapping("/broadcast")
     fun publishToAll(
         @RequestHeader("X-User-Id") createdBy: String,
-        @RequestHeader("X-Internal-Api-Key", required = false) internalApiKey: String?,
         @RequestBody body: PublishNotificationBroadcastRequest
     ): ResponseEntity<Any> {
         log.info(
@@ -68,7 +69,7 @@ class InternalAdminNotificationsController(
             body.type
         )
         return try {
-            val result = notificationService.publishToAll(createdBy, internalApiKey, body)
+            val result = notificationService.publishToAll(createdBy, body)
             log.info(
                 "POST /internal/admin/notifications/broadcast -> 200 | actorUserId={}, createdCount={}",
                 createdBy,

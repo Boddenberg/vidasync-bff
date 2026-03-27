@@ -18,7 +18,6 @@ import com.vidasync_bff.observability.AgentTelemetrySnapshot
 import com.vidasync_bff.observability.AgentTelemetryStageEventRecord
 import com.vidasync_bff.observability.AgentTelemetryToolCallRecord
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -32,8 +31,7 @@ import java.time.temporal.ChronoUnit
 @Service
 class TelemetryService(
     private val supabaseClient: SupabaseClient,
-    @Value("\${internal.admin.api-key:}") private val internalAdminApiKey: String,
-    @Value("\${telemetry.dashboard.max-raw-runs:10000}") private val maxRawRunsForMetrics: Int
+    @org.springframework.beans.factory.annotation.Value("\${telemetry.dashboard.max-raw-runs:10000}") private val maxRawRunsForMetrics: Int
 ) {
 
     private val log = LoggerFactory.getLogger(TelemetryService::class.java)
@@ -115,13 +113,12 @@ class TelemetryService(
 
     fun getMetrics(
         actorUserId: String,
-        providedInternalApiKey: String?,
         days: Int?,
         startDate: String?,
         endDate: String?,
         agent: String?
     ): TelemetryMetricsResponse {
-        validateInternalAccess(actorUserId, providedInternalApiKey)
+        validateInternalAccess(actorUserId)
 
         val filters = resolveFilters(
             days = days,
@@ -231,7 +228,6 @@ class TelemetryService(
 
     fun getRecentRuns(
         actorUserId: String,
-        providedInternalApiKey: String?,
         days: Int?,
         startDate: String?,
         endDate: String?,
@@ -239,7 +235,7 @@ class TelemetryService(
         status: String?,
         limit: Int?
     ): TelemetryRunsResponse {
-        validateInternalAccess(actorUserId, providedInternalApiKey)
+        validateInternalAccess(actorUserId)
 
         val filters = resolveFilters(
             days = days,
@@ -394,15 +390,9 @@ class TelemetryService(
         return normalizeOptional(value) ?: "unknown"
     }
 
-    private fun validateInternalAccess(actorUserId: String, providedInternalApiKey: String?) {
+    private fun validateInternalAccess(actorUserId: String) {
         if (actorUserId.trim().isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria")
-        }
-        if (internalAdminApiKey.isBlank()) {
-            return
-        }
-        if (providedInternalApiKey.isNullOrBlank() || providedInternalApiKey != internalAdminApiKey) {
-            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida")
         }
     }
 

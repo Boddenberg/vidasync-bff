@@ -123,7 +123,6 @@ class InternalAdminLlmJudgeMetricsControllerTests {
         `when`(
             llmJudgeMetricsService.getMetrics(
                 "admin-1",
-                "secret-key",
                 7,
                 null,
                 null,
@@ -139,7 +138,6 @@ class InternalAdminLlmJudgeMetricsControllerTests {
 
         mockMvc.get("/internal/admin/llm-judge/metrics") {
             header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "secret-key")
             param("days", "7")
             param("feature", "nutrition")
         }.andExpect {
@@ -156,8 +154,7 @@ class InternalAdminLlmJudgeMetricsControllerTests {
     fun `deve retornar status da response status exception`() {
         `when`(
             llmJudgeMetricsService.getMetrics(
-                "admin-1",
-                "wrong-key",
+                " ",
                 null,
                 null,
                 null,
@@ -169,14 +166,13 @@ class InternalAdminLlmJudgeMetricsControllerTests {
                 null,
                 null
             )
-        ).thenThrow(ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida"))
+        ).thenThrow(ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria"))
 
         mockMvc.get("/internal/admin/llm-judge/metrics") {
-            header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "wrong-key")
+            header("X-User-Id", " ")
         }.andExpect {
-            status { isUnauthorized() }
-            jsonPath("$.error") { value("internal api key invalida") }
+            status { isBadRequest() }
+            jsonPath("$.error") { value("header X-User-Id obrigatorio para auditoria") }
         }
     }
 }
