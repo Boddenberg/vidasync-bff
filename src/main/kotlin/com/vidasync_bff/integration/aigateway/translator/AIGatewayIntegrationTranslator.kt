@@ -113,6 +113,11 @@ class AIGatewayIntegrationTranslator {
             precisaRevisao = response.precisaRevisao,
             resultado = response.resultado,
             caloriasTexto = response.caloriasTexto,
+            model = response.model,
+            usage = response.usage,
+            metadata = response.metadata,
+            providerResponseId = response.providerResponseId,
+            durationMs = response.durationMs,
             erro = response.erro
         )
     }
@@ -128,6 +133,11 @@ class AIGatewayIntegrationTranslator {
             precisaRevisao = response.precisaRevisao,
             resultado = response.resultado,
             caloriasTexto = response.caloriasTexto,
+            model = response.model,
+            usage = response.usage,
+            metadata = response.metadata,
+            providerResponseId = response.providerResponseId,
+            durationMs = response.durationMs,
             erro = response.erro
         )
     }
@@ -135,11 +145,16 @@ class AIGatewayIntegrationTranslator {
     fun toChatIntegrationResponse(response: AIGatewayOpenAIChatResponse): AIGatewayChatIntegrationResponse {
         return AIGatewayChatIntegrationResponse(
             model = response.model,
+            status = response.status,
             response = response.response,
             conversationId = response.conversationId,
             intencaoDetectada = response.intencaoDetectada,
             roteamento = response.roteamento,
             memoria = response.memoria,
+            usage = response.usage,
+            metadata = response.metadata,
+            providerResponseId = response.providerResponseId,
+            durationMs = response.durationMs,
             traceId = response.traceId
         )
     }

@@ -6,6 +6,7 @@ import com.vidasync_bff.dto.response.ChatResponse
 import com.vidasync_bff.integration.aigateway.AIGatewayIntegration
 import com.vidasync_bff.integration.aigateway.AIGatewayIntegrationException
 import com.vidasync_bff.integration.aigateway.request.AIGatewayChatIntegrationRequest
+import com.vidasync_bff.observability.AgentTelemetryContext
 import com.vidasync_bff.observability.TraceContext
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -27,6 +28,13 @@ class ChatService(
     fun chat(userId: String?, request: ChatRequest): ChatResponse {
         val prompt = request.prompt?.trim().orEmpty()
         require(prompt.isNotBlank()) { "prompt e obrigatorio" }
+        AgentTelemetryContext.recordStageEvent(
+            stage = "chat_validation",
+            eventType = "stage",
+            status = "completed",
+            detail = "chat request validated",
+            payload = mapOf("promptChars" to prompt.length)
+        )
 
         val traceId = TraceContext.current()
         val conversationId = request.conversationId?.trim()?.takeIf { it.isNotBlank() }
@@ -48,6 +56,13 @@ class ChatService(
                 )
             )
         } catch (ex: AIGatewayIntegrationException) {
+            AgentTelemetryContext.recordStageEvent(
+                stage = "chat_gateway",
+                eventType = "error",
+                status = "error",
+                detail = ex.message,
+                payload = mapOf("conversationIdPresent" to (conversationId != null))
+            )
             throw mapGatewayFailure(ex)
         }
 
@@ -59,6 +74,19 @@ class ChatService(
         val memory = gatewayResponse.memoria.orEmpty()
         val warnings = toStringList(gatewayResponse.roteamento?.get("warnings")).ifEmpty { null }
         val needsReview = toBooleanValue(gatewayResponse.roteamento?.get("precisa_revisao")) ?: false
+
+        if (!warnings.isNullOrEmpty() || needsReview) {
+            AgentTelemetryContext.recordStageEvent(
+                stage = "chat_result",
+                eventType = "warning",
+                status = "completed",
+                detail = "chat response returned warnings or review flag",
+                payload = mapOf(
+                    "warningsCount" to (warnings?.size ?: 0),
+                    "needsReview" to needsReview
+                )
+            )
+        }
 
         val response = ChatResponse(
             response = responseText,
@@ -82,6 +110,17 @@ class ChatService(
             response.needsReview,
             response.warnings?.size ?: 0,
             response.memory?.totalTurns
+        )
+        AgentTelemetryContext.recordStageEvent(
+            stage = "chat_completed",
+            eventType = "flow",
+            status = "completed",
+            detail = "chat response prepared",
+            payload = mapOf(
+                "conversationIdPresent" to !response.conversationId.isNullOrBlank(),
+                "warningsCount" to (response.warnings?.size ?: 0),
+                "needsReview" to response.needsReview
+            )
         )
 
         return response

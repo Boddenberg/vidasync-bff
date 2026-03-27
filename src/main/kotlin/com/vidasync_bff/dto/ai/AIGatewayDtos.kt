@@ -28,5 +28,12 @@ data class AIGatewayRouteResponse(
     val resultado: Map<String, Any?>? = null,
     @JsonProperty("calorias_texto")
     val caloriasTexto: Map<String, Any?>? = null,
+    val model: String? = null,
+    val usage: AIGatewayUsageResponse? = null,
+    val metadata: Map<String, Any?>? = null,
+    @JsonProperty("provider_response_id")
+    val providerResponseId: String? = null,
+    @JsonProperty("duration_ms")
+    val durationMs: Double? = null,
     val erro: Any? = null
 )

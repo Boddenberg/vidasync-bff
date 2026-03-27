@@ -11,6 +11,7 @@ import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationR
 import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 import com.vidasync_bff.integration.aigateway.translator.AIGatewayIntegrationTranslator
+import com.vidasync_bff.observability.AgentTelemetryContext
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
@@ -68,6 +69,28 @@ class AIGatewayFeignIntegration(
                 warnings,
                 String.format(Locale.US, "%.4f", durationMs)
             )
+            AgentTelemetryContext.recordLlmCall(
+                provider = "openai",
+                operation = "openai_chat",
+                model = response.model,
+                status = response.status ?: "success",
+                inputTokens = response.usage?.inputTokens,
+                outputTokens = response.usage?.outputTokens,
+                totalTokens = response.usage?.totalTokens,
+                durationMs = durationMs,
+                providerResponseId = response.providerResponseId,
+                endpoint = "/v1/openai/chat",
+                metadata = mapOf("warningsCount" to warnings)
+            )
+            if (warnings > 0) {
+                AgentTelemetryContext.recordStageEvent(
+                    stage = "openai_chat",
+                    eventType = "warning",
+                    status = "completed",
+                    detail = "AI Gateway returned warnings",
+                    payload = mapOf("warningsCount" to warnings)
+                )
+            }
             response
         } catch (e: AIGatewayIntegrationException) {
             val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
@@ -83,6 +106,18 @@ class AIGatewayFeignIntegration(
                 e.responseBody,
                 e
             )
+            AgentTelemetryContext.recordLlmCall(
+                provider = "openai",
+                operation = "openai_chat",
+                status = "error",
+                durationMs = durationMs,
+                endpoint = "/v1/openai/chat",
+                errorMessage = e.message,
+                metadata = mapOf(
+                    "statusCode" to e.statusCode,
+                    "timeout" to timeout
+                )
+            )
             throw e
         } catch (e: Exception) {
             val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
@@ -97,6 +132,15 @@ class AIGatewayFeignIntegration(
                 e::class.java.simpleName,
                 e.message,
                 e
+            )
+            AgentTelemetryContext.recordLlmCall(
+                provider = "openai",
+                operation = "openai_chat",
+                status = "error",
+                durationMs = durationMs,
+                endpoint = "/v1/openai/chat",
+                errorMessage = e.message,
+                metadata = mapOf("timeout" to timeout)
             )
             throw AIGatewayIntegrationException(
                 message = "Falha ao chamar AI Gateway em openai_chat: ${e.message}",
@@ -210,6 +254,7 @@ class AIGatewayFeignIntegration(
                 response.warnings?.size ?: 0,
                 String.format(Locale.US, "%.4f", durationMs)
             )
+            recordOperationalTelemetry(operation, path, response, durationMs)
             response
         } catch (e: AIGatewayIntegrationException) {
             val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
@@ -224,6 +269,18 @@ class AIGatewayFeignIntegration(
                 String.format(Locale.US, "%.4f", durationMs),
                 e.responseBody,
                 e
+            )
+            AgentTelemetryContext.recordStageEvent(
+                stage = operation,
+                eventType = if (timeout) "timeout" else "error",
+                status = "error",
+                durationMs = durationMs,
+                detail = e.message,
+                payload = mapOf(
+                    "path" to path,
+                    "statusCode" to e.statusCode,
+                    "timeout" to timeout
+                )
             )
             throw e
         } catch (e: Exception) {
@@ -240,9 +297,74 @@ class AIGatewayFeignIntegration(
                 e.message,
                 e
             )
+            AgentTelemetryContext.recordStageEvent(
+                stage = operation,
+                eventType = if (timeout) "timeout" else "error",
+                status = "error",
+                durationMs = durationMs,
+                detail = e.message,
+                payload = mapOf(
+                    "path" to path,
+                    "timeout" to timeout
+                )
+            )
             throw AIGatewayIntegrationException(
                 message = "Falha ao chamar AI Gateway em $operation: ${e.message}",
                 cause = e
+            )
+        }
+    }
+
+    private fun recordOperationalTelemetry(
+        operation: String,
+        path: String,
+        response: AIGatewayIntegrationResponse,
+        durationMs: Double
+    ) {
+        val warningsCount = response.warnings?.size ?: 0
+        val hasLlmUsage = !response.model.isNullOrBlank() ||
+            response.usage != null ||
+            !response.providerResponseId.isNullOrBlank()
+
+        if (hasLlmUsage) {
+            AgentTelemetryContext.recordLlmCall(
+                provider = "ai_gateway",
+                operation = operation,
+                model = response.model,
+                status = response.status ?: "success",
+                inputTokens = response.usage?.inputTokens,
+                outputTokens = response.usage?.outputTokens,
+                totalTokens = response.usage?.totalTokens,
+                durationMs = durationMs,
+                providerResponseId = response.providerResponseId,
+                endpoint = path,
+                metadata = mapOf("warningsCount" to warningsCount)
+            )
+        }
+
+        AgentTelemetryContext.recordStageEvent(
+            stage = operation,
+            eventType = "flow",
+            status = if (response.status.equals("erro", ignoreCase = true)) "error" else "completed",
+            durationMs = durationMs,
+            detail = "AI Gateway call completed",
+            payload = mapOf(
+                "path" to path,
+                "warningsCount" to warningsCount,
+                "needsReview" to (response.precisaRevisao == true)
+            )
+        )
+
+        if (warningsCount > 0 || response.precisaRevisao == true) {
+            AgentTelemetryContext.recordStageEvent(
+                stage = operation,
+                eventType = "warning",
+                status = "completed",
+                detail = "AI Gateway returned warnings or review flags",
+                payload = mapOf(
+                    "warningsCount" to warningsCount,
+                    "needsReview" to (response.precisaRevisao == true)
+                )
             )
         }
     }

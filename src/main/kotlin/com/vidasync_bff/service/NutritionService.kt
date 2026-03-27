@@ -12,6 +12,7 @@ import com.vidasync_bff.integration.aigateway.AIGatewayIntegrationException
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelineFotoCaloriasIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
+import com.vidasync_bff.observability.AgentTelemetryContext
 import com.vidasync_bff.observability.TraceContext
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -97,6 +98,14 @@ class NutritionService(
                 traceId,
                 String.format(Locale.US, "%.4f", parseDurationMs),
             )
+            AgentTelemetryContext.recordStageEvent(
+                stage = "parse_ingredients",
+                eventType = "warning",
+                status = "error",
+                durationMs = parseDurationMs,
+                detail = "nenhum alimento informado",
+                payload = mapOf("hasImageUrl" to !imageUrlForAgent.isNullOrBlank())
+            )
             return CalorieResponse(
                 error = "Nenhum alimento informado",
                 precisaRevisao = true,
@@ -111,6 +120,17 @@ class NutritionService(
             String.format(Locale.US, "%.4f", parseDurationMs),
             rawIngredients,
         )
+        AgentTelemetryContext.recordStageEvent(
+            stage = "parse_ingredients",
+            eventType = "stage",
+            status = "completed",
+            durationMs = parseDurationMs,
+            detail = "ingredientes resolvidos",
+            payload = mapOf(
+                "ingredientCount" to rawIngredients.size,
+                "hasImageUrl" to !imageUrlForAgent.isNullOrBlank()
+            )
+        )
 
         val keyToOriginal = rawIngredients.associateBy { cacheService.normalizeKey(it) }
         val hits = mutableListOf<Pair<String, IngredientCacheRow>>()
@@ -118,7 +138,19 @@ class NutritionService(
 
         if (shouldUseCache) {
             val cacheLookupStartedNs = System.nanoTime()
-            val cacheHits = cacheService.lookupBatch(keyToOriginal.keys.toList())
+            val cacheHits = try {
+                cacheService.lookupBatch(keyToOriginal.keys.toList())
+            } catch (ex: Exception) {
+                val cacheLookupDurationMs = (System.nanoTime() - cacheLookupStartedNs) / 1_000_000.0
+                AgentTelemetryContext.recordToolCall(
+                    toolName = "ingredient_cache.lookup_batch",
+                    status = "error",
+                    durationMs = cacheLookupDurationMs,
+                    errorMessage = ex.message,
+                    metadata = mapOf("keysCount" to keyToOriginal.size)
+                )
+                throw ex
+            }
             val cacheLookupDurationMs = (System.nanoTime() - cacheLookupStartedNs) / 1_000_000.0
 
             for ((key, original) in keyToOriginal) {
@@ -138,6 +170,27 @@ class NutritionService(
                 hits.size,
                 misses.size,
             )
+            AgentTelemetryContext.recordToolCall(
+                toolName = "ingredient_cache.lookup_batch",
+                status = "success",
+                durationMs = cacheLookupDurationMs,
+                metadata = mapOf(
+                    "keysCount" to keyToOriginal.size,
+                    "hits" to hits.size,
+                    "misses" to misses.size
+                )
+            )
+            AgentTelemetryContext.recordStageEvent(
+                stage = "cache_lookup",
+                eventType = "stage",
+                status = "completed",
+                durationMs = cacheLookupDurationMs,
+                detail = "cache lookup executado",
+                payload = mapOf(
+                    "hits" to hits.size,
+                    "misses" to misses.size
+                )
+            )
         } else {
             misses.addAll(keyToOriginal.map { (key, original) -> key to original })
             log.info(
@@ -145,6 +198,13 @@ class NutritionService(
                 traceId,
                 if (isImageOnlyRequest) "image_only_request" else "nutrition_cache_disabled",
                 misses.size
+            )
+            AgentTelemetryContext.recordStageEvent(
+                stage = "cache_lookup",
+                eventType = "stage",
+                status = "skipped",
+                detail = if (isImageOnlyRequest) "image_only_request" else "nutrition_cache_disabled",
+                payload = mapOf("misses" to misses.size)
             )
         }
 
@@ -159,7 +219,8 @@ class NutritionService(
                     callAIGatewayForSingleIngredient(
                         key = key,
                         original = original,
-                        imageUrlForAgent = imageUrlForAgent
+                        imageUrlForAgent = imageUrlForAgent,
+                        traceId = traceId
                     )
                 })
             }
@@ -184,6 +245,13 @@ class NutritionService(
                     newResults.add(
                         buildGatewayFallbackResult(key = key, original = original, warning = warning)
                     )
+                    AgentTelemetryContext.recordStageEvent(
+                        stage = "ai_enrichment",
+                        eventType = if (isTimeoutFailure(e)) "timeout" else "fallback",
+                        status = "completed",
+                        detail = warning,
+                        payload = mapOf("ingredient" to original)
+                    )
                 }
             }
             executor.shutdown()
@@ -193,7 +261,27 @@ class NutritionService(
                     .filter { !it.precisaRevisao && it.warnings.isEmpty() }
                     .map { it.cacheRow }
                 if (cacheableRows.isNotEmpty()) {
-                    cacheService.saveBatch(cacheableRows)
+                    val cacheSaveStartedNs = System.nanoTime()
+                    try {
+                        cacheService.saveBatch(cacheableRows)
+                        val cacheSaveDurationMs = (System.nanoTime() - cacheSaveStartedNs) / 1_000_000.0
+                        AgentTelemetryContext.recordToolCall(
+                            toolName = "ingredient_cache.save_batch",
+                            status = "success",
+                            durationMs = cacheSaveDurationMs,
+                            metadata = mapOf("rowCount" to cacheableRows.size)
+                        )
+                    } catch (ex: Exception) {
+                        val cacheSaveDurationMs = (System.nanoTime() - cacheSaveStartedNs) / 1_000_000.0
+                        AgentTelemetryContext.recordToolCall(
+                            toolName = "ingredient_cache.save_batch",
+                            status = "error",
+                            durationMs = cacheSaveDurationMs,
+                            errorMessage = ex.message,
+                            metadata = mapOf("rowCount" to cacheableRows.size)
+                        )
+                        throw ex
+                    }
                 } else {
                     log.info("Cache skip: nenhum resultado novo elegivel para persistencia")
                 }
@@ -205,6 +293,14 @@ class NutritionService(
             traceId,
             String.format(Locale.US, "%.4f", aiEnrichmentDurationMs),
             newResults.size,
+        )
+        AgentTelemetryContext.recordStageEvent(
+            stage = "ai_enrichment",
+            eventType = "stage",
+            status = "completed",
+            durationMs = aiEnrichmentDurationMs,
+            detail = "enriquecimento por IA concluido",
+            payload = mapOf("enrichedItems" to newResults.size)
         )
 
         val allIngredients = mutableListOf<IngredientDetail>()
@@ -262,6 +358,13 @@ class NutritionService(
 
         if (invalidItems.isNotEmpty()) {
             log.warn("Itens invalidos encontrados: {} -> rejeitando tudo", invalidItems)
+            AgentTelemetryContext.recordStageEvent(
+                stage = "aggregation",
+                eventType = "warning",
+                status = "error",
+                detail = "itens invalidos encontrados",
+                payload = mapOf("invalidCount" to invalidItems.size)
+            )
             return CalorieResponse(
                 nutrition = null,
                 invalidItems = invalidItems,
@@ -287,6 +390,18 @@ class NutritionService(
             String.format(Locale.US, "%.4f", aggregationDurationMs),
             String.format(Locale.US, "%.4f", totalDurationMs),
         )
+        AgentTelemetryContext.recordStageEvent(
+            stage = "aggregation",
+            eventType = "stage",
+            status = "completed",
+            durationMs = aggregationDurationMs,
+            detail = "nutricao agregada",
+            payload = mapOf(
+                "validItems" to allIngredients.size,
+                "warningsCount" to responseWarnings.size,
+                "needsReview" to responseNeedsReview
+            )
+        )
 
         return CalorieResponse(
             nutrition = totalNutrition,
@@ -311,7 +426,8 @@ class NutritionService(
     private fun callAIGatewayForSingleIngredient(
         key: String,
         original: String,
-        imageUrlForAgent: String?
+        imageUrlForAgent: String?,
+        traceId: String?
     ): List<IngredientGatewayResult> {
         log.info(
             "AI Gateway request nutrition ingredient='{}' has_image_url={}",
@@ -325,7 +441,7 @@ class NutritionService(
                         imageUrl = imageUrlForAgent,
                         foods = original.takeUnless { it.equals("itens da imagem", ignoreCase = true) },
                         idioma = "pt-BR",
-                        traceId = TraceContext.current()
+                        traceId = traceId
                     )
                 )
             } else {
@@ -338,7 +454,8 @@ class NutritionService(
                             "origem" to "vidasync-bff",
                             "feature" to "nutrition",
                             "has_image_url" to false
-                        )
+                        ),
+                        traceId = traceId
                     )
                 )
             }
@@ -372,10 +489,20 @@ class NutritionService(
                     ),
                     precisaRevisao = true,
                     warnings = listOf("Nao foi possivel identificar comida ou porcoes detectaveis na imagem."),
-                    traceId = TraceContext.current()
+                    traceId = traceId
                 ).let(::listOf)
             }
             log.error("Erro ao consultar AI Gateway para '{}': {}", original, e.message, e)
+            AgentTelemetryContext.recordStageEvent(
+                stage = "ingredient_ai_gateway",
+                eventType = if (isTimeoutFailure(e)) "timeout" else "fallback",
+                status = "completed",
+                detail = "falha ao validar ingrediente via IA",
+                payload = mapOf(
+                    "ingredient" to original,
+                    "statusCode" to e.statusCode
+                )
+            )
             listOf(
                 IngredientGatewayResult(
                 cacheRow = IngredientCacheRow(
@@ -390,11 +517,18 @@ class NutritionService(
                 ),
                 precisaRevisao = true,
                 warnings = listOf("Nao foi possivel validar o ingrediente '$original' com o servico de IA."),
-                traceId = TraceContext.current()
+                traceId = traceId
                 )
             )
         } catch (e: Exception) {
             log.error("Erro ao consultar AI Gateway para '{}': {}", original, e.message, e)
+            AgentTelemetryContext.recordStageEvent(
+                stage = "ingredient_ai_gateway",
+                eventType = if (isTimeoutFailure(e)) "timeout" else "fallback",
+                status = "completed",
+                detail = "falha ao validar ingrediente via IA",
+                payload = mapOf("ingredient" to original)
+            )
             listOf(
                 IngredientGatewayResult(
                 cacheRow = IngredientCacheRow(
@@ -409,7 +543,7 @@ class NutritionService(
                 ),
                 precisaRevisao = true,
                 warnings = listOf("Nao foi possivel validar o ingrediente '$original' com o servico de IA."),
-                traceId = TraceContext.current()
+                traceId = traceId
                 )
             )
         }
@@ -591,10 +725,33 @@ class NutritionService(
             fallbackImage
         } else {
             log.info("nutrition.input.media resolved via legacy base64 upload fallback")
-            val uploaded = storageClient.uploadBase64Object(
-                base64Data = fallbackImage,
-                fileNamePrefix = "nutrition_fallback",
-                targetBucket = pipelineBucket
+            val uploadStartedNs = System.nanoTime()
+            val uploaded = try {
+                storageClient.uploadBase64Object(
+                    base64Data = fallbackImage,
+                    fileNamePrefix = "nutrition_fallback",
+                    targetBucket = pipelineBucket
+                )
+            } catch (ex: Exception) {
+                val uploadDurationMs = (System.nanoTime() - uploadStartedNs) / 1_000_000.0
+                AgentTelemetryContext.recordToolCall(
+                    toolName = "supabase_storage.upload_base64",
+                    status = "error",
+                    durationMs = uploadDurationMs,
+                    errorMessage = ex.message,
+                    metadata = mapOf("bucket" to pipelineBucket)
+                )
+                throw ex
+            }
+            val uploadDurationMs = (System.nanoTime() - uploadStartedNs) / 1_000_000.0
+            AgentTelemetryContext.recordToolCall(
+                toolName = "supabase_storage.upload_base64",
+                status = "success",
+                durationMs = uploadDurationMs,
+                metadata = mapOf(
+                    "bucket" to pipelineBucket,
+                    "fileKey" to uploaded.fileKey
+                )
             )
             storageClient.buildPublicObjectUrl(
                 fileKey = uploaded.fileKey,

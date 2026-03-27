@@ -2,6 +2,7 @@ package com.vidasync_bff.integration.aigateway.response
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.vidasync_bff.dto.ai.AIGatewayUsageResponse
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class AIGatewayIntegrationResponse(
@@ -18,5 +19,12 @@ data class AIGatewayIntegrationResponse(
     val resultado: Map<String, Any?>? = null,
     @JsonProperty("calorias_texto")
     val caloriasTexto: Map<String, Any?>? = null,
+    val model: String? = null,
+    val usage: AIGatewayUsageResponse? = null,
+    val metadata: Map<String, Any?>? = null,
+    @JsonProperty("provider_response_id")
+    val providerResponseId: String? = null,
+    @JsonProperty("duration_ms")
+    val durationMs: Double? = null,
     val erro: Any? = null
 )
