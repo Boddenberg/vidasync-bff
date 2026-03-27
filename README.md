@@ -95,7 +95,7 @@ Ele abstrai:
 | Weight | registra e lista pesagens |
 | Feedback | salva feedback do usuario e expoe listagem para painel admin |
 | Notifications | entrega inbox do usuario, marca leitura, faz delete logico e delete fisico em lote |
-| Internal Admin | publica notificacoes e clona usuarios para suporte/teste |
+| Internal Admin | publica notificacoes, clona usuarios e expoe metricas do llm judge |
 | Uploads | gera signed upload URL para o frontend enviar arquivos direto ao storage |
 
 ---
@@ -256,6 +256,9 @@ Tambem evita preview de corpo para conteudos binarios como:
 | Metodo | Rota | Auth | Uso principal |
 | --- | --- | --- | --- |
 | `GET` | `/feedback` | `X-User-Id` e `X-Internal-Api-Key` se configurada | lista feedbacks para painel admin |
+| `GET` | `/internal/admin/llm-judge/metrics` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | dashboard de metricas agregadas do llm judge |
+| `GET` | `/internal/admin/telemetry/metrics` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | cards e graficos de custo, tokens e latencia por agente/modelo |
+| `GET` | `/internal/admin/telemetry/runs` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | lista de runs recentes com filtro por status/agente |
 | `POST` | `/internal/admin/notifications` | `X-Internal-Api-Key` se configurada | publica notificacao para um usuario |
 | `POST` | `/internal/admin/notifications/broadcast` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | broadcast para todos os usuarios |
 | `POST` | `/internal/admin/users/{id}/clone?dry_run=true|false` | `X-User-Id` para auditoria e `X-Internal-Api-Key` se configurada | clona usuario, refeicoes e favoritos |
@@ -522,6 +525,73 @@ sequenceDiagram
 - um hash aleatorio novo e gerado para o clone quando a coluna existe
 - a rota exige `X-User-Id` para auditoria
 
+### 6.13 LLM judge metrics
+
+#### O que essa rota entrega
+
+- resumo agregado de avaliacoes do `llm_judge_evaluations`
+- series diarias para grafico
+- agrupamentos por `feature`, `pipeline`, `handler`, `idioma` e `sourceModel`
+- top motivos de rejeicao e lista curta das avaliacoes mais recentes
+
+#### Endpoint
+
+```http
+GET /internal/admin/llm-judge/metrics?days=7&feature=nutrition
+X-User-Id: <actor-user-id>
+X-Internal-Api-Key: <internal-api-key>
+```
+
+#### Filtros suportados
+
+- `days`
+- `startDate`
+- `endDate`
+- `feature`
+- `pipeline`
+- `handler`
+- `idioma`
+- `sourceModel`
+- `judgeStatus`
+- `judgeDecision`
+
+#### Observacoes
+
+- `startDate` e `endDate` usam formato `YYYY-MM-DD`
+- quando `startDate` e `endDate` nao sao enviados, o backend usa `days=7` por padrao
+- a resposta ja vem pronta para cards, tabelas e graficos do painel admin
+
+### 6.14 Agent telemetry
+
+#### O que essas rotas entregam
+
+- lista de runs recentes do BFF com `requestId`, `traceId`, endpoint, custo, tokens e duracao
+- cards diarios por periodo a partir das views `telemetry_agent_runs_daily` e `telemetry_llm_models_daily`
+- breakdown por agente e por modelo para o painel interno
+
+#### Endpoints
+
+```http
+GET /internal/admin/telemetry/metrics?days=7&agent=nutrition
+GET /internal/admin/telemetry/runs?days=7&status=timeout&limit=20
+X-User-Id: <actor-user-id>
+X-Internal-Api-Key: <internal-api-key>
+```
+
+#### O que o backend grava
+
+- `telemetry_agent_runs`
+- `telemetry_llm_calls`
+- `telemetry_tool_calls`
+- `telemetry_stage_events`
+
+#### O que o frontend pode usar
+
+- `metrics.summary` para cards de custo, tokens e latencia
+- `metrics.daily` para serie temporal
+- `metrics.byAgent` e `metrics.byModel` para rankings
+- `runs.recentRuns` para a tabela de execucoes recentes
+
 ---
 
 ## 7. Mapa de dados no Supabase e buckets
@@ -539,6 +609,8 @@ sequenceDiagram
 | Weight | `weight_entries` |
 | Feedback | `developer_feedback` |
 | Notifications | `notifications` |
+| LLM judge | `llm_judge_evaluations` |
+| Agent telemetry | `telemetry_agent_runs`, `telemetry_llm_calls`, `telemetry_tool_calls`, `telemetry_stage_events` |
 | Internal clone | `user_clone_audit` |
 
 ### Buckets e usos
