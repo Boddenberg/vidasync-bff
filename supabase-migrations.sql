@@ -389,7 +389,7 @@ CREATE TABLE IF NOT EXISTS public.telemetry_agent_runs (
     request_id TEXT NOT NULL,
     trace_id TEXT NULL,
     agent TEXT NOT NULL,
-    endpoint TEXT NOT NULL,
+    entrypoint TEXT NOT NULL,
     http_method TEXT NOT NULL,
     http_status INTEGER NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('success', 'error', 'timeout')),
@@ -510,7 +510,7 @@ CREATE OR REPLACE VIEW public.telemetry_agent_runs_daily AS
 SELECT
     timezone('utc', started_at)::date AS day_utc,
     agent,
-    endpoint,
+    entrypoint,
     COUNT(*)::INTEGER AS run_count,
     COUNT(*) FILTER (WHERE status = 'success')::INTEGER AS success_count,
     COUNT(*) FILTER (WHERE status = 'error')::INTEGER AS error_count,

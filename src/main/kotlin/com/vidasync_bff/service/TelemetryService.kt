@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.web.client.RestClientResponseException
 import org.springframework.web.server.ResponseStatusException
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -35,49 +36,13 @@ class TelemetryService(
 ) {
 
     private val log = LoggerFactory.getLogger(TelemetryService::class.java)
+    @Volatile private var runsTableColumn = RunsPathColumn.ENTRYPOINT
+    @Volatile private var dailyRunsColumn = RunsPathColumn.ENTRYPOINT
 
     private val writeTypeRef = object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
     private val runsTypeRef = object : ParameterizedTypeReference<List<SupabaseTelemetryAgentRunRow>>() {}
     private val dailyRunsTypeRef = object : ParameterizedTypeReference<List<SupabaseTelemetryAgentRunsDailyRow>>() {}
     private val dailyModelsTypeRef = object : ParameterizedTypeReference<List<SupabaseTelemetryLlmModelsDailyRow>>() {}
-
-    private val runsSelect = listOf(
-        "run_id",
-        "request_id",
-        "trace_id",
-        "agent",
-        "endpoint",
-        "http_method",
-        "http_status",
-        "status",
-        "timeout",
-        "duration_ms",
-        "input_tokens",
-        "output_tokens",
-        "total_tokens",
-        "total_cost_usd",
-        "llm_call_count",
-        "tool_call_count",
-        "stage_event_count",
-        "error_message",
-        "request_context",
-        "started_at",
-        "finished_at"
-    ).joinToString(",")
-
-    private val runsDailySelect = listOf(
-        "day_utc",
-        "agent",
-        "endpoint",
-        "run_count",
-        "success_count",
-        "error_count",
-        "timeout_count",
-        "total_cost_usd",
-        "total_tokens",
-        "avg_duration_ms",
-        "p95_duration_ms"
-    ).joinToString(",")
 
     private val llmModelsDailySelect = listOf(
         "day_utc",
@@ -96,7 +61,7 @@ class TelemetryService(
         if (snapshot == null) return
 
         try {
-            insertRows("telemetry_agent_runs", listOf(toRunMap(snapshot.run)))
+            insertRunRows(listOf(snapshot.run))
             if (snapshot.llmCalls.isNotEmpty()) {
                 insertRows("telemetry_llm_calls", snapshot.llmCalls.map(::toLlmCallMap))
             }
@@ -270,7 +235,63 @@ class TelemetryService(
         )
     }
 
+    private fun insertRunRows(runs: List<AgentTelemetryRunRecord>) {
+        if (runs.isEmpty()) return
+
+        val preferredColumn = runsTableColumn
+        try {
+            postRunRows(runs, preferredColumn)
+        } catch (ex: Exception) {
+            if (!shouldRetryRunColumn(ex, preferredColumn)) {
+                throw ex
+            }
+
+            val fallbackColumn = preferredColumn.fallback()
+            log.warn(
+                "Falha ao gravar telemetry_agent_runs com coluna {}. Tentando fallback para {}. erro={}",
+                preferredColumn.dbColumn,
+                fallbackColumn.dbColumn,
+                ex.message
+            )
+            postRunRows(runs, fallbackColumn)
+            runsTableColumn = fallbackColumn
+        }
+    }
+
+    private fun postRunRows(runs: List<AgentTelemetryRunRecord>, column: RunsPathColumn) {
+        supabaseClient.post(
+            table = "telemetry_agent_runs",
+            body = runs.map { toRunMap(it, column) },
+            typeRef = writeTypeRef
+        )
+        runsTableColumn = column
+    }
+
     private fun loadRuns(filters: ResolvedFilters, limit: Int): List<SupabaseTelemetryAgentRunRow> {
+        val preferredColumn = runsTableColumn
+        return try {
+            getRuns(filters, limit, preferredColumn)
+        } catch (ex: Exception) {
+            if (!shouldRetryRunColumn(ex, preferredColumn)) {
+                throw ex
+            }
+
+            val fallbackColumn = preferredColumn.fallback()
+            log.warn(
+                "Falha ao consultar telemetry_agent_runs com coluna {}. Tentando fallback para {}. erro={}",
+                preferredColumn.dbColumn,
+                fallbackColumn.dbColumn,
+                ex.message
+            )
+            getRuns(filters, limit, fallbackColumn)
+        }
+    }
+
+    private fun getRuns(
+        filters: ResolvedFilters,
+        limit: Int,
+        column: RunsPathColumn
+    ): List<SupabaseTelemetryAgentRunRow> {
         val queryParams = mutableMapOf(
             "and" to "(started_at.gte.${filters.startInclusiveUtc},started_at.lt.${filters.endExclusiveUtc})",
             "order" to "started_at.desc,run_id.desc",
@@ -279,27 +300,54 @@ class TelemetryService(
         filters.agent?.let { queryParams["agent"] = "eq.$it" }
         filters.status?.let { queryParams["status"] = "eq.$it" }
 
-        return supabaseClient.get(
+        val rows = supabaseClient.get(
             table = "telemetry_agent_runs",
-            select = runsSelect,
+            select = buildRunsSelect(column),
             queryParams = queryParams,
             typeRef = runsTypeRef
         ) ?: emptyList()
+        runsTableColumn = column
+        return rows
     }
 
     private fun loadDailyRuns(filters: ResolvedFilters): List<SupabaseTelemetryAgentRunsDailyRow> {
+        val preferredColumn = dailyRunsColumn
+        return try {
+            getDailyRuns(filters, preferredColumn)
+        } catch (ex: Exception) {
+            if (!shouldRetryRunColumn(ex, preferredColumn)) {
+                throw ex
+            }
+
+            val fallbackColumn = preferredColumn.fallback()
+            log.warn(
+                "Falha ao consultar telemetry_agent_runs_daily com coluna {}. Tentando fallback para {}. erro={}",
+                preferredColumn.dbColumn,
+                fallbackColumn.dbColumn,
+                ex.message
+            )
+            getDailyRuns(filters, fallbackColumn)
+        }
+    }
+
+    private fun getDailyRuns(
+        filters: ResolvedFilters,
+        column: RunsPathColumn
+    ): List<SupabaseTelemetryAgentRunsDailyRow> {
         val queryParams = mutableMapOf(
             "and" to "(day_utc.gte.${filters.startDate},day_utc.lte.${filters.endDate})",
-            "order" to "day_utc.asc,agent.asc,endpoint.asc"
+            "order" to "day_utc.asc,agent.asc,${column.dbColumn}.asc"
         )
         filters.agent?.let { queryParams["agent"] = "eq.$it" }
 
-        return supabaseClient.get(
+        val rows = supabaseClient.get(
             table = "telemetry_agent_runs_daily",
-            select = runsDailySelect,
+            select = buildDailyRunsSelect(column),
             queryParams = queryParams,
             typeRef = dailyRunsTypeRef
         ) ?: emptyList()
+        dailyRunsColumn = column
+        return rows
     }
 
     private fun loadDailyModels(filters: ResolvedFilters): List<SupabaseTelemetryLlmModelsDailyRow> {
@@ -422,13 +470,13 @@ class TelemetryService(
         )
     }
 
-    private fun toRunMap(run: AgentTelemetryRunRecord): Map<String, Any?> {
+    private fun toRunMap(run: AgentTelemetryRunRecord, column: RunsPathColumn): Map<String, Any?> {
         return mapOf(
             "run_id" to run.runId,
             "request_id" to run.requestId,
             "trace_id" to run.traceId,
             "agent" to run.agent,
-            "endpoint" to run.endpoint,
+            column.dbColumn to run.endpoint,
             "http_method" to run.httpMethod,
             "http_status" to run.httpStatus,
             "status" to run.status,
@@ -530,6 +578,68 @@ class TelemetryService(
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toDouble()
     }
 
+    private fun buildRunsSelect(column: RunsPathColumn): String {
+        return listOf(
+            "run_id",
+            "request_id",
+            "trace_id",
+            "agent",
+            aliasAsEndpoint(column),
+            "http_method",
+            "http_status",
+            "status",
+            "timeout",
+            "duration_ms",
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "total_cost_usd",
+            "llm_call_count",
+            "tool_call_count",
+            "stage_event_count",
+            "error_message",
+            "request_context",
+            "started_at",
+            "finished_at"
+        ).joinToString(",")
+    }
+
+    private fun buildDailyRunsSelect(column: RunsPathColumn): String {
+        return listOf(
+            "day_utc",
+            "agent",
+            aliasAsEndpoint(column),
+            "run_count",
+            "success_count",
+            "error_count",
+            "timeout_count",
+            "total_cost_usd",
+            "total_tokens",
+            "avg_duration_ms",
+            "p95_duration_ms"
+        ).joinToString(",")
+    }
+
+    private fun aliasAsEndpoint(column: RunsPathColumn): String {
+        return if (column == RunsPathColumn.ENDPOINT) "endpoint" else "endpoint:${column.dbColumn}"
+    }
+
+    private fun shouldRetryRunColumn(ex: Exception, attemptedColumn: RunsPathColumn): Boolean {
+        val errorText = buildErrorText(ex)
+        return errorText.contains(attemptedColumn.dbColumn) &&
+            (errorText.contains("telemetry_agent_runs") || errorText.contains("telemetry_agent_runs_daily")) &&
+            (
+                errorText.contains("does not exist") ||
+                    errorText.contains("schema cache") ||
+                    errorText.contains("could not find")
+                )
+    }
+
+    private fun buildErrorText(ex: Exception): String {
+        val responseBody = (ex as? RestClientResponseException)?.responseBodyAsString.orEmpty()
+        return "${ex.message.orEmpty()} $responseBody".lowercase()
+    }
+
     private data class ResolvedFilters(
         val startDate: LocalDate,
         val endDate: LocalDate,
@@ -539,6 +649,15 @@ class TelemetryService(
         val agent: String?,
         val status: String?
     )
+
+    private enum class RunsPathColumn(val dbColumn: String) {
+        ENTRYPOINT("entrypoint"),
+        ENDPOINT("endpoint");
+
+        fun fallback(): RunsPathColumn {
+            return if (this == ENTRYPOINT) ENDPOINT else ENTRYPOINT
+        }
+    }
 
     companion object {
         private const val DEFAULT_WINDOW_DAYS = 7
