@@ -12,10 +12,26 @@ class SupabaseClient(private val supabaseRestClient: RestClient) {
         queryParams: Map<String, String> = emptyMap(),
         typeRef: ParameterizedTypeReference<T>
     ): T? {
+        return get(
+            table = table,
+            select = "*",
+            queryParams = queryParams,
+            typeRef = typeRef
+        )
+    }
+
+    fun <T> get(
+        table: String,
+        select: String,
+        queryParams: Map<String, String> = emptyMap(),
+        typeRef: ParameterizedTypeReference<T>
+    ): T? {
+        val normalizedSelect = select.trim().ifBlank { "*" }
+
         return supabaseRestClient.get()
             .uri { uriBuilder ->
                 uriBuilder.path("/$table")
-                    .queryParam("select", "*")
+                    .queryParam("select", normalizedSelect)
                     .also { queryParams.forEach { (key, value) -> uriBuilder.queryParam(key, value) } }
                     .build()
             }
