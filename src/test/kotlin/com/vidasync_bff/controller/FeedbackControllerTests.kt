@@ -107,11 +107,10 @@ class FeedbackControllerTests {
             )
         )
 
-        `when`(feedbackService.getAll("admin-1", "secret-key")).thenReturn(response)
+        `when`(feedbackService.getAll("admin-1")).thenReturn(response)
 
         mockMvc.get("/feedback") {
             header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "secret-key")
         }.andExpect {
             status { isOk() }
             content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
@@ -123,16 +122,15 @@ class FeedbackControllerTests {
 
     @Test
     fun `deve retornar status da response status exception no get all`() {
-        `when`(feedbackService.getAll("admin-1", "wrong-key"))
-            .thenThrow(ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida"))
+        `when`(feedbackService.getAll(" "))
+            .thenThrow(ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria"))
 
         mockMvc.get("/feedback") {
-            header("X-User-Id", "admin-1")
-            header("X-Internal-Api-Key", "wrong-key")
+            header("X-User-Id", " ")
         }.andExpect {
-            status { isUnauthorized() }
+            status { isBadRequest() }
             content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
-            jsonPath("$.error") { value("internal api key invalida") }
+            jsonPath("$.error") { value("header X-User-Id obrigatorio para auditoria") }
         }
     }
 }

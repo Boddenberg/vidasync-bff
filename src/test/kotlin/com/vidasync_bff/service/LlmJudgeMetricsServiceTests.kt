@@ -16,10 +16,7 @@ import kotlin.test.assertNull
 class LlmJudgeMetricsServiceTests {
 
     private val supabaseClient = mock(SupabaseClient::class.java)
-    private val service = LlmJudgeMetricsService(
-        supabaseClient = supabaseClient,
-        internalAdminApiKey = "secret-key"
-    )
+    private val service = LlmJudgeMetricsService(supabaseClient = supabaseClient)
 
     @Test
     fun `deve agregar metricas do llm judge por periodo`() {
@@ -82,7 +79,6 @@ class LlmJudgeMetricsServiceTests {
 
         val response = service.getMetrics(
             actorUserId = "admin-1",
-            providedInternalApiKey = "secret-key",
             days = null,
             startDate = "2026-03-24",
             endDate = "2026-03-26",
@@ -145,7 +141,6 @@ class LlmJudgeMetricsServiceTests {
 
         val response = service.getMetrics(
             actorUserId = "admin-1",
-            providedInternalApiKey = "secret-key",
             days = null,
             startDate = "2026-03-24",
             endDate = "2026-03-24",
@@ -162,11 +157,10 @@ class LlmJudgeMetricsServiceTests {
     }
 
     @Test
-    fun `deve validar internal api key`() {
+    fun `deve validar actor user id`() {
         val exception = assertFailsWith<ResponseStatusException> {
             service.getMetrics(
-                actorUserId = "admin-1",
-                providedInternalApiKey = "wrong-key",
+                actorUserId = " ",
                 days = 7,
                 startDate = null,
                 endDate = null,
@@ -180,8 +174,8 @@ class LlmJudgeMetricsServiceTests {
             )
         }
 
-        assertEquals(HttpStatus.UNAUTHORIZED, exception.statusCode)
-        assertEquals("internal api key invalida", exception.reason)
+        assertEquals(HttpStatus.BAD_REQUEST, exception.statusCode)
+        assertEquals("header X-User-Id obrigatorio para auditoria", exception.reason)
     }
 
     private fun evaluationRow(

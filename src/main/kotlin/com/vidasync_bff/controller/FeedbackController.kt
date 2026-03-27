@@ -41,12 +41,11 @@ class FeedbackController(
 
     @GetMapping
     fun getAll(
-        @RequestHeader("X-User-Id") actorUserId: String,
-        @RequestHeader("X-Internal-Api-Key", required = false) internalApiKey: String?
+        @RequestHeader("X-User-Id") actorUserId: String
     ): ResponseEntity<Any> {
         log.info("GET /feedback | actorUserId={}", actorUserId)
         return try {
-            val result = feedbackService.getAll(actorUserId, internalApiKey)
+            val result = feedbackService.getAll(actorUserId)
             log.info("GET /feedback -> 200 | totalFeedbacks={}", result.size)
             ResponseEntity.ok(mapOf("feedbacks" to result))
         } catch (e: ResponseStatusException) {

@@ -6,7 +6,6 @@ import com.vidasync_bff.dto.response.InternalUserCloneCopied
 import com.vidasync_bff.dto.response.InternalUserCloneResponse
 import com.vidasync_bff.dto.response.InternalUserCloneSecurity
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
@@ -18,8 +17,7 @@ import java.util.UUID
 
 @Service
 class InternalAdminUserCloneService(
-    private val supabaseClient: SupabaseClient,
-    @Value("\${internal.admin.api-key:}") private val internalAdminApiKey: String
+    private val supabaseClient: SupabaseClient
 ) {
 
     private val log = LoggerFactory.getLogger(InternalAdminUserCloneService::class.java)
@@ -28,11 +26,8 @@ class InternalAdminUserCloneService(
     fun cloneUser(
         sourceUserId: String,
         dryRun: Boolean,
-        clonedBy: String,
-        providedInternalApiKey: String?
+        clonedBy: String
     ): InternalUserCloneResponse {
-        validateInternalAccess(providedInternalApiKey)
-
         val sourceId = sourceUserId.trim()
         if (sourceId.isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "source user id obrigatorio")
@@ -108,15 +103,6 @@ class InternalAdminUserCloneService(
                 sessionsCopied = false
             )
         )
-    }
-
-    private fun validateInternalAccess(providedInternalApiKey: String?) {
-        if (internalAdminApiKey.isBlank()) {
-            return
-        }
-        if (providedInternalApiKey.isNullOrBlank() || providedInternalApiKey != internalAdminApiKey) {
-            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal api key invalida")
-        }
     }
 
     private fun loadSourceProfile(sourceUserId: String): Map<String, Any?> {
