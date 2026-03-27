@@ -64,6 +64,21 @@ data class SupabaseTelemetryLlmModelsDailyRow(
     @JsonProperty("p95_duration_ms") val p95DurationMs: Double? = null
 )
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class SupabaseTelemetryLlmCallRow(
+    @JsonProperty("run_id") val runId: String,
+    val provider: String? = null,
+    val operation: String? = null,
+    val model: String? = null,
+    val status: String? = null,
+    @JsonProperty("input_tokens") val inputTokens: Int? = null,
+    @JsonProperty("output_tokens") val outputTokens: Int? = null,
+    @JsonProperty("total_tokens") val totalTokens: Int? = null,
+    @JsonProperty("duration_ms") val durationMs: Double? = null,
+    @JsonProperty("cost_usd") val costUsd: Double? = null,
+    @JsonProperty("created_at") val createdAt: String
+)
+
 data class TelemetryMetricsFiltersResponse(
     val startDate: String,
     val endDate: String,

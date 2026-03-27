@@ -123,6 +123,8 @@ object AgentTelemetryContext {
 
     fun currentRunId(): String? = current.get()?.runId
 
+    fun currentRequestId(): String? = current.get()?.requestId
+
     fun recordLlmCall(
         provider: String,
         operation: String,
@@ -218,7 +220,7 @@ object AgentTelemetryContext {
 
 private class AgentTelemetryCollector(
     val runId: String,
-    private val requestId: String,
+    val requestId: String,
     private val traceId: String?,
     private val agent: String,
     private val endpoint: String,

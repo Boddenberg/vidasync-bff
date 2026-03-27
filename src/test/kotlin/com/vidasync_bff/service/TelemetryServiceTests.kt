@@ -3,6 +3,7 @@ package com.vidasync_bff.service
 import com.vidasync_bff.client.SupabaseClient
 import com.vidasync_bff.dto.response.SupabaseTelemetryAgentRunRow
 import com.vidasync_bff.dto.response.SupabaseTelemetryAgentRunsDailyRow
+import com.vidasync_bff.dto.response.SupabaseTelemetryLlmCallRow
 import com.vidasync_bff.dto.response.SupabaseTelemetryLlmModelsDailyRow
 import com.vidasync_bff.observability.AgentTelemetryLlmCallRecord
 import com.vidasync_bff.observability.AgentTelemetryRunRecord
@@ -149,43 +150,37 @@ class TelemetryServiceTests {
 
         `when`(
             supabaseClient.get(
-                eqValue("telemetry_llm_models_daily"),
-                eqValue(
-                    "day_utc,agent,model,llm_call_count,total_cost_usd,input_tokens,output_tokens,total_tokens,avg_duration_ms,p95_duration_ms"
-                ),
+                eqValue("telemetry_llm_calls"),
+                eqValue("run_id,provider,operation,model,status,input_tokens,output_tokens,total_tokens,duration_ms,cost_usd,created_at"),
                 eqValue(
                     mapOf(
-                        "and" to "(day_utc.gte.2026-03-24,day_utc.lte.2026-03-26)",
-                        "order" to "day_utc.asc,agent.asc,model.asc"
+                        "run_id" to "in.(run-3,run-2,run-1)",
+                        "order" to "created_at.desc"
                     )
                 ),
-                anyDailyModelsTypeRef()
+                anyLlmCallsTypeRef()
             )
         ).thenReturn(
             listOf(
-                dailyModelRow(
-                    dayUtc = "2026-03-25",
-                    agent = "chat",
+                llmCallRow(
+                    runId = "run-2",
                     model = "gpt-4o-mini",
-                    llmCallCount = 1,
-                    totalCostUsd = 0.0008,
                     inputTokens = 120,
                     outputTokens = 180,
                     totalTokens = 300,
-                    avgDurationMs = 1500.0,
-                    p95DurationMs = 1500.0
+                    durationMs = 1500.0,
+                    costUsd = 0.0008,
+                    createdAt = "2026-03-25T12:00:00Z"
                 ),
-                dailyModelRow(
-                    dayUtc = "2026-03-26",
-                    agent = "nutrition",
+                llmCallRow(
+                    runId = "run-3",
                     model = "gpt-4.1-mini",
-                    llmCallCount = 1,
-                    totalCostUsd = 0.0012,
                     inputTokens = 200,
                     outputTokens = 220,
                     totalTokens = 420,
-                    avgDurationMs = 950.0,
-                    p95DurationMs = 950.0
+                    durationMs = 950.0,
+                    costUsd = 0.0012,
+                    createdAt = "2026-03-26T15:00:00Z"
                 )
             )
         )
@@ -538,10 +533,82 @@ class TelemetryServiceTests {
 
         service.flushQuietly(snapshot)
 
-        verify(supabaseClient, times(1)).post(eqValue("telemetry_agent_runs"), anyBody(), anyWriteTypeRef())
+        verify(supabaseClient, times(1)).post(
+            eqValue("telemetry_agent_runs"),
+            eqValue(listOf(currentRunWriteMap(snapshot.run))),
+            anyWriteTypeRef()
+        )
         verify(supabaseClient, times(1)).post(eqValue("telemetry_llm_calls"), anyBody(), anyWriteTypeRef())
         verify(supabaseClient, times(1)).post(eqValue("telemetry_tool_calls"), anyBody(), anyWriteTypeRef())
         verify(supabaseClient, times(1)).post(eqValue("telemetry_stage_events"), anyBody(), anyWriteTypeRef())
+    }
+
+    @Test
+    fun `deve fazer fallback para escrita legada quando schema atual nao aceitar colunas novas`() {
+        val run = AgentTelemetryRunRecord(
+            runId = "run-legacy-write",
+            requestId = "req-legacy-write",
+            traceId = "trace-legacy-write",
+            agent = "chat",
+            endpoint = "/chat",
+            httpMethod = "POST",
+            httpStatus = 200,
+            status = "success",
+            timeout = false,
+            durationMs = 100.0,
+            totalCostUsd = 0.0001,
+            inputTokens = 10,
+            outputTokens = 12,
+            totalTokens = 22,
+            llmCallCount = 1,
+            toolCallCount = 0,
+            stageEventCount = 1,
+            errorMessage = null,
+            requestContext = mapOf("path" to "/chat"),
+            startedAt = "2026-03-26T10:00:00Z",
+            finishedAt = "2026-03-26T10:00:01Z"
+        )
+
+        `when`(
+            supabaseClient.post(
+                eqValue("telemetry_agent_runs"),
+                eqValue(listOf(currentRunWriteMap(run))),
+                anyWriteTypeRef()
+            )
+        ).thenThrow(RuntimeException("column telemetry_agent_runs.http_status_code does not exist"))
+
+        `when`(
+            supabaseClient.post(
+                eqValue("telemetry_agent_runs"),
+                eqValue(listOf(legacyRunWriteMap(run, "entrypoint"))),
+                anyWriteTypeRef()
+            )
+        ).thenThrow(RuntimeException("column telemetry_agent_runs.entrypoint does not exist"))
+
+        service.flushQuietly(
+            AgentTelemetrySnapshot(
+                run = run,
+                llmCalls = emptyList(),
+                toolCalls = emptyList(),
+                stageEvents = emptyList()
+            )
+        )
+
+        verify(supabaseClient, times(1)).post(
+            eqValue("telemetry_agent_runs"),
+            eqValue(listOf(currentRunWriteMap(run))),
+            anyWriteTypeRef()
+        )
+        verify(supabaseClient, times(1)).post(
+            eqValue("telemetry_agent_runs"),
+            eqValue(listOf(legacyRunWriteMap(run, "entrypoint"))),
+            anyWriteTypeRef()
+        )
+        verify(supabaseClient, times(1)).post(
+            eqValue("telemetry_agent_runs"),
+            eqValue(listOf(legacyRunWriteMap(run, "endpoint"))),
+            anyWriteTypeRef()
+        )
     }
 
     @Test
@@ -674,6 +741,29 @@ class TelemetryServiceTests {
         p95DurationMs = p95DurationMs
     )
 
+    private fun llmCallRow(
+        runId: String,
+        model: String,
+        inputTokens: Int,
+        outputTokens: Int,
+        totalTokens: Int,
+        durationMs: Double,
+        costUsd: Double,
+        createdAt: String
+    ) = SupabaseTelemetryLlmCallRow(
+        runId = runId,
+        provider = "openai",
+        operation = "openai_chat",
+        model = model,
+        status = "success",
+        inputTokens = inputTokens,
+        outputTokens = outputTokens,
+        totalTokens = totalTokens,
+        durationMs = durationMs,
+        costUsd = costUsd,
+        createdAt = createdAt
+    )
+
     private fun <T> eqValue(value: T): T {
         ArgumentMatchers.eq(value)
         return value
@@ -687,6 +777,11 @@ class TelemetryServiceTests {
     private fun anyDailyRunsTypeRef(): ParameterizedTypeReference<List<SupabaseTelemetryAgentRunsDailyRow>> {
         ArgumentMatchers.any(ParameterizedTypeReference::class.java)
         return object : ParameterizedTypeReference<List<SupabaseTelemetryAgentRunsDailyRow>>() {}
+    }
+
+    private fun anyLlmCallsTypeRef(): ParameterizedTypeReference<List<SupabaseTelemetryLlmCallRow>> {
+        ArgumentMatchers.any(ParameterizedTypeReference::class.java)
+        return object : ParameterizedTypeReference<List<SupabaseTelemetryLlmCallRow>>() {}
     }
 
     private fun anyDailyModelsTypeRef(): ParameterizedTypeReference<List<SupabaseTelemetryLlmModelsDailyRow>> {
@@ -720,5 +815,57 @@ class TelemetryServiceTests {
 
     private fun currentDailyRunsSelect(): String {
         return "day_utc,agent,status,run_count:runs_count,llm_call_count:llm_calls_count,tool_call_count:tool_calls_count,stage_event_count:stage_events_count,total_cost_usd,input_tokens:total_input_tokens,output_tokens:total_output_tokens,total_tokens,avg_duration_ms,review_rate"
+    }
+
+    private fun currentRunWriteMap(run: AgentTelemetryRunRecord): Map<String, Any?> {
+        return mapOf(
+            "run_id" to run.runId,
+            "request_id" to run.requestId,
+            "trace_id" to run.traceId,
+            "agent" to run.agent,
+            "entrypoint" to run.endpoint,
+            "http_method" to run.httpMethod,
+            "http_status_code" to run.httpStatus,
+            "status" to run.status,
+            "timeout" to run.timeout,
+            "duration_ms" to run.durationMs,
+            "total_cost_usd" to run.totalCostUsd,
+            "total_input_tokens" to run.inputTokens,
+            "total_output_tokens" to run.outputTokens,
+            "total_tokens" to run.totalTokens,
+            "llm_calls_count" to run.llmCallCount,
+            "tool_calls_count" to run.toolCallCount,
+            "stage_events_count" to run.stageEventCount,
+            "error_message" to run.errorMessage,
+            "metadata_json" to run.requestContext,
+            "started_at" to run.startedAt,
+            "finished_at" to run.finishedAt
+        )
+    }
+
+    private fun legacyRunWriteMap(run: AgentTelemetryRunRecord, column: String): Map<String, Any?> {
+        return mapOf(
+            "run_id" to run.runId,
+            "request_id" to run.requestId,
+            "trace_id" to run.traceId,
+            "agent" to run.agent,
+            column to run.endpoint,
+            "http_method" to run.httpMethod,
+            "http_status" to run.httpStatus,
+            "status" to run.status,
+            "timeout" to run.timeout,
+            "duration_ms" to run.durationMs,
+            "total_cost_usd" to run.totalCostUsd,
+            "input_tokens" to run.inputTokens,
+            "output_tokens" to run.outputTokens,
+            "total_tokens" to run.totalTokens,
+            "llm_call_count" to run.llmCallCount,
+            "tool_call_count" to run.toolCallCount,
+            "stage_event_count" to run.stageEventCount,
+            "error_message" to run.errorMessage,
+            "request_context" to run.requestContext,
+            "started_at" to run.startedAt,
+            "finished_at" to run.finishedAt
+        )
     }
 }

@@ -3,6 +3,7 @@ package com.vidasync_bff.service
 import com.vidasync_bff.client.SupabaseClient
 import com.vidasync_bff.dto.response.SupabaseTelemetryAgentRunRow
 import com.vidasync_bff.dto.response.SupabaseTelemetryAgentRunsDailyRow
+import com.vidasync_bff.dto.response.SupabaseTelemetryLlmCallRow
 import com.vidasync_bff.dto.response.SupabaseTelemetryLlmModelsDailyRow
 import com.vidasync_bff.dto.response.TelemetryMetricsAgentBreakdownResponse
 import com.vidasync_bff.dto.response.TelemetryMetricsDailyPointResponse
@@ -26,6 +27,7 @@ import org.springframework.web.server.ResponseStatusException
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 
@@ -37,6 +39,10 @@ class TelemetryService(
 
     private val log = LoggerFactory.getLogger(TelemetryService::class.java)
     @Volatile private var runsReadSchema = RunsReadSchema.CURRENT
+    @Volatile private var runsWriteSchema = RunsWriteSchema.CURRENT
+    @Volatile private var llmCallsWriteSchema = ChildWriteSchema.CURRENT
+    @Volatile private var toolCallsWriteSchema = ChildWriteSchema.CURRENT
+    @Volatile private var stageEventsWriteSchema = ChildWriteSchema.CURRENT
     @Volatile private var dailyRunsReadSchema = DailyRunsReadSchema.CURRENT
     @Volatile private var runsTableColumn = RunsPathColumn.ENTRYPOINT
     @Volatile private var dailyRunsColumn = RunsPathColumn.ENTRYPOINT
@@ -44,6 +50,7 @@ class TelemetryService(
     private val writeTypeRef = object : ParameterizedTypeReference<List<Map<String, Any?>>>() {}
     private val runsTypeRef = object : ParameterizedTypeReference<List<SupabaseTelemetryAgentRunRow>>() {}
     private val dailyRunsTypeRef = object : ParameterizedTypeReference<List<SupabaseTelemetryAgentRunsDailyRow>>() {}
+    private val llmCallsTypeRef = object : ParameterizedTypeReference<List<SupabaseTelemetryLlmCallRow>>() {}
     private val dailyModelsTypeRef = object : ParameterizedTypeReference<List<SupabaseTelemetryLlmModelsDailyRow>>() {}
 
     private val llmModelsDailySelect = listOf(
@@ -65,13 +72,13 @@ class TelemetryService(
         try {
             insertRunRows(listOf(snapshot.run))
             if (snapshot.llmCalls.isNotEmpty()) {
-                insertRows("telemetry_llm_calls", snapshot.llmCalls.map(::toLlmCallMap))
+                insertLlmCallRows(snapshot.llmCalls)
             }
             if (snapshot.toolCalls.isNotEmpty()) {
-                insertRows("telemetry_tool_calls", snapshot.toolCalls.map(::toToolCallMap))
+                insertToolCallRows(snapshot.toolCalls)
             }
             if (snapshot.stageEvents.isNotEmpty()) {
-                insertRows("telemetry_stage_events", snapshot.stageEvents.map(::toStageEventMap))
+                insertStageEventRows(snapshot.stageEvents)
             }
         } catch (ex: Exception) {
             log.warn("Falha ao fazer flush da telemetry do run {}: {}", snapshot.run.runId, ex.message, ex)
@@ -97,15 +104,16 @@ class TelemetryService(
 
         val rawRuns = loadRuns(filters, maxRawRunsForMetrics)
         val dailyRuns = loadDailyRuns(filters)
-        val dailyModels = loadDailyModels(filters)
+        val rawLlmCalls = loadLlmCalls(rawRuns.map { it.runId })
 
-        val dailyByDay = dailyRuns.groupBy { it.dayUtc }
-        val modelsByDay = dailyModels.groupBy { it.dayUtc }
+        val dailyByDay = dailyRuns.groupBy { normalizeDayUtc(it.dayUtc) }
+        val llmCallsByDay = rawLlmCalls.groupBy { normalizeDayUtc(it.createdAt) }
+        val runAgentById = rawRuns.associate { it.runId to normalizeBucket(it.agent) }
 
         val daily = ((0 until filters.windowDays).map { filters.startDate.plusDays(it.toLong()).toString() })
             .map { day ->
                 val runRows = dailyByDay[day].orEmpty()
-                val modelRows = modelsByDay[day].orEmpty()
+                val llmCallRows = llmCallsByDay[day].orEmpty()
                 val hasDailyTokenBreakdown = runRows.any { it.inputTokens != null || it.outputTokens != null }
                 TelemetryMetricsDailyPointResponse(
                     dayUtc = day,
@@ -117,17 +125,17 @@ class TelemetryService(
                     inputTokens = if (hasDailyTokenBreakdown) {
                         runRows.sumOf { it.inputTokens ?: 0 }
                     } else {
-                        modelRows.sumOf { it.inputTokens ?: 0 }
+                        llmCallRows.sumOf { it.inputTokens ?: 0 }
                     },
                     outputTokens = if (hasDailyTokenBreakdown) {
                         runRows.sumOf { it.outputTokens ?: 0 }
                     } else {
-                        modelRows.sumOf { it.outputTokens ?: 0 }
+                        llmCallRows.sumOf { it.outputTokens ?: 0 }
                     },
                     totalTokens = if (runRows.any { it.totalTokens != null }) {
                         runRows.sumOf { it.totalTokens ?: 0 }
                     } else {
-                        modelRows.sumOf { it.totalTokens ?: 0 }
+                        llmCallRows.sumOf { it.totalTokens ?: 0 }
                     },
                     averageDurationMs = weightedAverage(runRows.map { it.avgDurationMs to it.runCount }),
                     p95DurationMs = weightedAverage(runRows.map { it.p95DurationMs to it.runCount })
@@ -154,19 +162,19 @@ class TelemetryService(
                     .thenBy { it.agent }
             )
 
-        val byModel = dailyModels
-            .groupBy { normalizeBucket(it.model) to normalizeBucket(it.agent) }
+        val byModel = rawLlmCalls
+            .groupBy { normalizeBucket(it.model) to normalizeBucket(runAgentById[it.runId]) }
             .map { (key, rows) ->
                 TelemetryMetricsModelBreakdownResponse(
                     model = key.first,
                     agent = key.second,
-                    llmCallCount = rows.sumOf { it.llmCallCount },
-                    totalCostUsd = round(rows.sumOf { it.totalCostUsd ?: 0.0 }),
+                    llmCallCount = rows.size,
+                    totalCostUsd = round(rows.sumOf { it.costUsd ?: 0.0 }),
                     inputTokens = rows.sumOf { it.inputTokens ?: 0 },
                     outputTokens = rows.sumOf { it.outputTokens ?: 0 },
                     totalTokens = rows.sumOf { it.totalTokens ?: 0 },
-                    averageDurationMs = weightedAverage(rows.map { it.avgDurationMs to it.llmCallCount }),
-                    p95DurationMs = weightedAverage(rows.map { it.p95DurationMs to it.llmCallCount })
+                    averageDurationMs = average(rows.mapNotNull { it.durationMs }),
+                    p95DurationMs = percentile95(rows.mapNotNull { it.durationMs })
                 )
             }
             .sortedWith(
@@ -250,12 +258,115 @@ class TelemetryService(
         )
     }
 
+    private fun insertLlmCallRows(calls: List<AgentTelemetryLlmCallRecord>) {
+        if (calls.isEmpty()) return
+
+        if (llmCallsWriteSchema == ChildWriteSchema.CURRENT) {
+            try {
+                insertRows("telemetry_llm_calls", calls.map(::toCurrentLlmCallMap))
+                return
+            } catch (ex: Exception) {
+                if (!shouldFallbackToLegacyLlmCalls(ex)) {
+                    throw ex
+                }
+
+                log.warn(
+                    "Falha ao gravar telemetry_llm_calls no schema atual. Tentando fallback legado. erro={}",
+                    ex.message
+                )
+                llmCallsWriteSchema = ChildWriteSchema.LEGACY
+            }
+        }
+
+        insertRows("telemetry_llm_calls", calls.map(::toLlmCallMap))
+        llmCallsWriteSchema = ChildWriteSchema.LEGACY
+    }
+
+    private fun insertToolCallRows(calls: List<AgentTelemetryToolCallRecord>) {
+        if (calls.isEmpty()) return
+
+        if (toolCallsWriteSchema == ChildWriteSchema.CURRENT) {
+            try {
+                insertRows("telemetry_tool_calls", calls.map(::toCurrentToolCallMap))
+                return
+            } catch (ex: Exception) {
+                if (!shouldFallbackToLegacyToolCalls(ex)) {
+                    throw ex
+                }
+
+                log.warn(
+                    "Falha ao gravar telemetry_tool_calls no schema atual. Tentando fallback legado. erro={}",
+                    ex.message
+                )
+                toolCallsWriteSchema = ChildWriteSchema.LEGACY
+            }
+        }
+
+        insertRows("telemetry_tool_calls", calls.map(::toToolCallMap))
+        toolCallsWriteSchema = ChildWriteSchema.LEGACY
+    }
+
+    private fun insertStageEventRows(events: List<AgentTelemetryStageEventRecord>) {
+        if (events.isEmpty()) return
+
+        if (stageEventsWriteSchema == ChildWriteSchema.CURRENT) {
+            try {
+                insertRows("telemetry_stage_events", events.map(::toCurrentStageEventMap))
+                return
+            } catch (ex: Exception) {
+                if (!shouldFallbackToLegacyStageEvents(ex)) {
+                    throw ex
+                }
+
+                log.warn(
+                    "Falha ao gravar telemetry_stage_events no schema atual. Tentando fallback legado. erro={}",
+                    ex.message
+                )
+                stageEventsWriteSchema = ChildWriteSchema.LEGACY
+            }
+        }
+
+        insertRows("telemetry_stage_events", events.map(::toStageEventMap))
+        stageEventsWriteSchema = ChildWriteSchema.LEGACY
+    }
+
     private fun insertRunRows(runs: List<AgentTelemetryRunRecord>) {
         if (runs.isEmpty()) return
 
+        if (runsWriteSchema == RunsWriteSchema.CURRENT) {
+            try {
+                postCurrentRunRows(runs)
+                return
+            } catch (ex: Exception) {
+                if (!shouldFallbackToLegacyRunWrites(ex)) {
+                    throw ex
+                }
+
+                log.warn(
+                    "Falha ao gravar telemetry_agent_runs no schema atual. Tentando fallback legado. erro={}",
+                    ex.message
+                )
+                runsWriteSchema = RunsWriteSchema.LEGACY
+            }
+        }
+
+        postLegacyRunRows(runs)
+    }
+
+    private fun postCurrentRunRows(runs: List<AgentTelemetryRunRecord>) {
+        supabaseClient.post(
+            table = "telemetry_agent_runs",
+            body = runs.map(::toCurrentRunMap),
+            typeRef = writeTypeRef
+        )
+        runsWriteSchema = RunsWriteSchema.CURRENT
+        runsTableColumn = RunsPathColumn.ENTRYPOINT
+    }
+
+    private fun postLegacyRunRows(runs: List<AgentTelemetryRunRecord>) {
         val preferredColumn = runsTableColumn
         try {
-            postRunRows(runs, preferredColumn)
+            postLegacyRunRows(runs, preferredColumn)
         } catch (ex: Exception) {
             if (!shouldRetryRunColumn(ex, preferredColumn)) {
                 throw ex
@@ -268,17 +379,18 @@ class TelemetryService(
                 fallbackColumn.dbColumn,
                 ex.message
             )
-            postRunRows(runs, fallbackColumn)
+            postLegacyRunRows(runs, fallbackColumn)
             runsTableColumn = fallbackColumn
         }
     }
 
-    private fun postRunRows(runs: List<AgentTelemetryRunRecord>, column: RunsPathColumn) {
+    private fun postLegacyRunRows(runs: List<AgentTelemetryRunRecord>, column: RunsPathColumn) {
         supabaseClient.post(
             table = "telemetry_agent_runs",
-            body = runs.map { toRunMap(it, column) },
+            body = runs.map { toLegacyRunMap(it, column) },
             typeRef = writeTypeRef
         )
+        runsWriteSchema = RunsWriteSchema.LEGACY
         runsTableColumn = column
     }
 
@@ -462,6 +574,41 @@ class TelemetryService(
         }
     }
 
+    private fun loadLlmCalls(runIds: List<String>): List<SupabaseTelemetryLlmCallRow> {
+        if (runIds.isEmpty()) {
+            return emptyList()
+        }
+
+        val select = listOf(
+            "run_id",
+            "provider",
+            "operation",
+            "model",
+            "status",
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "duration_ms",
+            "cost_usd",
+            "created_at"
+        ).joinToString(",")
+
+        return runIds
+            .distinct()
+            .chunked(200)
+            .flatMap { chunk ->
+                supabaseClient.get(
+                    table = "telemetry_llm_calls",
+                    select = select,
+                    queryParams = mapOf(
+                        "run_id" to "in.(${chunk.joinToString(",")})",
+                        "order" to "created_at.desc"
+                    ),
+                    typeRef = llmCallsTypeRef
+                ) ?: emptyList()
+            }
+    }
+
     private fun resolveFilters(
         days: Int?,
         startDate: String?,
@@ -535,6 +682,14 @@ class TelemetryService(
         return normalizeOptional(value) ?: "unknown"
     }
 
+    private fun normalizeDayUtc(value: String): String {
+        return try {
+            OffsetDateTime.parse(value).withOffsetSameInstant(ZoneOffset.UTC).toLocalDate().toString()
+        } catch (_: Exception) {
+            value.substringBefore('T')
+        }
+    }
+
     private fun validateInternalAccess(actorUserId: String) {
         if (actorUserId.trim().isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria")
@@ -567,7 +722,33 @@ class TelemetryService(
         )
     }
 
-    private fun toRunMap(run: AgentTelemetryRunRecord, column: RunsPathColumn): Map<String, Any?> {
+    private fun toCurrentRunMap(run: AgentTelemetryRunRecord): Map<String, Any?> {
+        return mapOf(
+            "run_id" to run.runId,
+            "request_id" to run.requestId,
+            "trace_id" to run.traceId,
+            "agent" to run.agent,
+            "entrypoint" to run.endpoint,
+            "http_method" to run.httpMethod,
+            "http_status_code" to run.httpStatus,
+            "status" to run.status,
+            "timeout" to run.timeout,
+            "duration_ms" to run.durationMs,
+            "total_cost_usd" to run.totalCostUsd,
+            "total_input_tokens" to run.inputTokens,
+            "total_output_tokens" to run.outputTokens,
+            "total_tokens" to run.totalTokens,
+            "llm_calls_count" to run.llmCallCount,
+            "tool_calls_count" to run.toolCallCount,
+            "stage_events_count" to run.stageEventCount,
+            "error_message" to run.errorMessage,
+            "metadata_json" to run.requestContext,
+            "started_at" to run.startedAt,
+            "finished_at" to run.finishedAt
+        )
+    }
+
+    private fun toLegacyRunMap(run: AgentTelemetryRunRecord, column: RunsPathColumn): Map<String, Any?> {
         return mapOf(
             "run_id" to run.runId,
             "request_id" to run.requestId,
@@ -590,6 +771,34 @@ class TelemetryService(
             "request_context" to run.requestContext,
             "started_at" to run.startedAt,
             "finished_at" to run.finishedAt
+        )
+    }
+
+    private fun toCurrentLlmCallMap(call: AgentTelemetryLlmCallRecord): Map<String, Any?> {
+        return mapOf(
+            "call_id" to call.callId,
+            "run_id" to call.runId,
+            "request_id" to call.requestId,
+            "trace_id" to call.traceId,
+            "created_at" to call.createdAt,
+            "provider" to call.provider,
+            "operation" to call.operation,
+            "model" to call.model,
+            "provider_response_id" to call.providerResponseId,
+            "status" to call.status,
+            "timeout" to resolveTimeoutFlag(call.status, call.metadata["timeout"]),
+            "duration_ms" to call.durationMs,
+            "input_tokens" to call.inputTokens,
+            "output_tokens" to call.outputTokens,
+            "total_tokens" to call.totalTokens,
+            "cost_usd" to call.costUsd,
+            "prompt_chars" to extractIntMetadata(call.metadata, "promptChars", "prompt_chars"),
+            "output_chars" to extractIntMetadata(call.metadata, "outputChars", "output_chars"),
+            "error_type" to call.metadata["errorType"]?.toString(),
+            "error_message" to call.errorMessage,
+            "prompt_preview_masked" to call.metadata["promptPreviewMasked"]?.toString(),
+            "response_preview_masked" to call.metadata["responsePreviewMasked"]?.toString(),
+            "metadata_json" to call.metadata
         )
     }
 
@@ -617,6 +826,24 @@ class TelemetryService(
         )
     }
 
+    private fun toCurrentToolCallMap(call: AgentTelemetryToolCallRecord): Map<String, Any?> {
+        return mapOf(
+            "tool_call_id" to call.toolCallId,
+            "run_id" to call.runId,
+            "request_id" to call.requestId,
+            "trace_id" to call.traceId,
+            "created_at" to call.createdAt,
+            "tool_name" to call.toolName,
+            "status" to call.status,
+            "duration_ms" to call.durationMs,
+            "timeout" to resolveTimeoutFlag(call.status, call.metadata["timeout"]),
+            "error_type" to call.metadata["errorType"]?.toString(),
+            "warnings_count" to (extractIntMetadata(call.metadata, "warningsCount", "warnings_count") ?: 0),
+            "precisa_revisao" to (extractBooleanMetadata(call.metadata, "needsReview", "precisa_revisao") ?: false),
+            "metadata_json" to call.metadata
+        )
+    }
+
     private fun toToolCallMap(call: AgentTelemetryToolCallRecord): Map<String, Any?> {
         return mapOf(
             "tool_call_id" to call.toolCallId,
@@ -630,6 +857,27 @@ class TelemetryService(
             "error_message" to call.errorMessage,
             "metadata" to call.metadata,
             "created_at" to call.createdAt
+        )
+    }
+
+    private fun toCurrentStageEventMap(event: AgentTelemetryStageEventRecord): Map<String, Any?> {
+        return mapOf(
+            "event_id" to event.eventId,
+            "run_id" to event.runId,
+            "request_id" to event.requestId,
+            "trace_id" to event.traceId,
+            "created_at" to event.createdAt,
+            "event_type" to event.eventType,
+            "name" to event.stage,
+            "status" to event.status,
+            "duration_ms" to event.durationMs,
+            "timeout" to resolveTimeoutFlag(event.status, event.payload["timeout"]),
+            "flow" to event.payload["flow"]?.toString(),
+            "engine" to event.payload["engine"]?.toString(),
+            "reason" to event.detail,
+            "used" to extractBooleanMetadata(event.payload, "used"),
+            "documents_count" to extractIntMetadata(event.payload, "documentsCount", "documents_count"),
+            "metadata_json" to event.payload
         )
     }
 
@@ -648,6 +896,44 @@ class TelemetryService(
             "payload" to event.payload,
             "created_at" to event.createdAt
         )
+    }
+
+    private fun resolveTimeoutFlag(status: String?, rawTimeout: Any?): Boolean {
+        extractBooleanMetadata(mapOf("timeout" to rawTimeout), "timeout")?.let { return it }
+        val normalizedStatus = normalizeOptional(status)?.lowercase() ?: return false
+        return normalizedStatus in setOf("timeout", "timed_out")
+    }
+
+    private fun extractIntMetadata(metadata: Map<String, Any?>, vararg keys: String): Int? {
+        return keys.asSequence()
+            .mapNotNull { key ->
+                when (val value = metadata[key]) {
+                    is Int -> value
+                    is Long -> value.toInt()
+                    is Double -> value.toInt()
+                    is Float -> value.toInt()
+                    is Number -> value.toInt()
+                    is String -> value.trim().toIntOrNull()
+                    else -> null
+                }
+            }
+            .firstOrNull()
+    }
+
+    private fun extractBooleanMetadata(metadata: Map<String, Any?>, vararg keys: String): Boolean? {
+        return keys.asSequence()
+            .mapNotNull { key ->
+                when (val value = metadata[key]) {
+                    is Boolean -> value
+                    is String -> when (value.trim().lowercase()) {
+                        "true" -> true
+                        "false" -> false
+                        else -> null
+                    }
+                    else -> null
+                }
+            }
+            .firstOrNull()
     }
 
     private fun average(values: List<Double>): Double? {
@@ -765,6 +1051,58 @@ class TelemetryService(
         return if (column == RunsPathColumn.ENDPOINT) "endpoint" else "endpoint:${column.dbColumn}"
     }
 
+    private fun shouldFallbackToLegacyLlmCalls(ex: Exception): Boolean {
+        val errorText = buildErrorText(ex)
+        return errorText.contains("telemetry_llm_calls") && (
+            errorText.contains("timeout") ||
+                errorText.contains("prompt_chars") ||
+                errorText.contains("output_chars") ||
+                errorText.contains("error_type") ||
+                errorText.contains("prompt_preview_masked") ||
+                errorText.contains("response_preview_masked") ||
+                errorText.contains("metadata_json")
+            )
+    }
+
+    private fun shouldFallbackToLegacyToolCalls(ex: Exception): Boolean {
+        val errorText = buildErrorText(ex)
+        return errorText.contains("telemetry_tool_calls") && (
+            errorText.contains("timeout") ||
+                errorText.contains("error_type") ||
+                errorText.contains("warnings_count") ||
+                errorText.contains("precisa_revisao") ||
+                errorText.contains("metadata_json")
+            )
+    }
+
+    private fun shouldFallbackToLegacyStageEvents(ex: Exception): Boolean {
+        val errorText = buildErrorText(ex)
+        return errorText.contains("telemetry_stage_events") && (
+            errorText.contains("name") ||
+                errorText.contains("timeout") ||
+                errorText.contains("flow") ||
+                errorText.contains("engine") ||
+                errorText.contains("reason") ||
+                errorText.contains("used") ||
+                errorText.contains("documents_count") ||
+                errorText.contains("metadata_json")
+            )
+    }
+
+    private fun shouldFallbackToLegacyRunWrites(ex: Exception): Boolean {
+        val errorText = buildErrorText(ex)
+        return errorText.contains("telemetry_agent_runs") && (
+            errorText.contains("entrypoint") ||
+                errorText.contains("http_status_code") ||
+                errorText.contains("total_input_tokens") ||
+                errorText.contains("total_output_tokens") ||
+                errorText.contains("llm_calls_count") ||
+                errorText.contains("tool_calls_count") ||
+                errorText.contains("stage_events_count") ||
+                errorText.contains("metadata_json")
+            )
+    }
+
     private fun shouldFallbackToLegacyRuns(ex: Exception): Boolean {
         val errorText = buildErrorText(ex)
         return errorText.contains("telemetry_agent_runs") && (
@@ -857,6 +1195,16 @@ class TelemetryService(
     )
 
     private enum class RunsReadSchema {
+        CURRENT,
+        LEGACY
+    }
+
+    private enum class RunsWriteSchema {
+        CURRENT,
+        LEGACY
+    }
+
+    private enum class ChildWriteSchema {
         CURRENT,
         LEGACY
     }
