@@ -34,7 +34,7 @@ class TelemetryServiceTests {
         `when`(
             supabaseClient.get(
                 eqValue("telemetry_agent_runs"),
-                eqValue(runsSelect("entrypoint")),
+                eqValue(currentRunsSelect()),
                 eqValue(
                     mapOf(
                         "and" to "(started_at.gte.2026-03-24T00:00Z,started_at.lt.2026-03-27T00:00Z)",
@@ -91,55 +91,58 @@ class TelemetryServiceTests {
         `when`(
             supabaseClient.get(
                 eqValue("telemetry_agent_runs_daily"),
-                eqValue(dailyRunsSelect("entrypoint")),
+                eqValue(currentDailyRunsSelect()),
                 eqValue(
                     mapOf(
                         "and" to "(day_utc.gte.2026-03-24,day_utc.lte.2026-03-26)",
-                        "order" to "day_utc.asc,agent.asc,entrypoint.asc"
+                        "order" to "day_utc.asc,agent.asc,status.asc"
                     )
                 ),
                 anyDailyRunsTypeRef()
             )
         ).thenReturn(
             listOf(
-                dailyRunRow(
+                currentDailyRunRow(
                     dayUtc = "2026-03-24",
                     agent = "nutrition",
-                    endpoint = "/nutrition/calories",
+                    status = "timeout",
                     runCount = 1,
-                    successCount = 0,
-                    errorCount = 1,
-                    timeoutCount = 1,
+                    llmCallCount = 0,
+                    toolCallCount = 0,
+                    stageEventCount = 1,
                     totalCostUsd = 0.0,
+                    inputTokens = 0,
+                    outputTokens = 0,
                     totalTokens = 0,
-                    avgDurationMs = 2100.0,
-                    p95DurationMs = 2100.0
+                    avgDurationMs = 2100.0
                 ),
-                dailyRunRow(
+                currentDailyRunRow(
                     dayUtc = "2026-03-25",
                     agent = "chat",
-                    endpoint = "/chat",
+                    status = "error",
                     runCount = 1,
-                    successCount = 0,
-                    errorCount = 1,
-                    timeoutCount = 0,
+                    llmCallCount = 1,
+                    toolCallCount = 0,
+                    stageEventCount = 1,
                     totalCostUsd = 0.0008,
+                    inputTokens = 120,
+                    outputTokens = 180,
                     totalTokens = 300,
-                    avgDurationMs = 1500.0,
-                    p95DurationMs = 1500.0
+                    avgDurationMs = 1500.0
                 ),
-                dailyRunRow(
+                currentDailyRunRow(
                     dayUtc = "2026-03-26",
                     agent = "nutrition",
-                    endpoint = "/nutrition/calories",
+                    status = "success",
                     runCount = 1,
-                    successCount = 1,
-                    errorCount = 0,
-                    timeoutCount = 0,
+                    llmCallCount = 1,
+                    toolCallCount = 0,
+                    stageEventCount = 1,
                     totalCostUsd = 0.0012,
+                    inputTokens = 200,
+                    outputTokens = 220,
                     totalTokens = 420,
-                    avgDurationMs = 950.0,
-                    p95DurationMs = 950.0
+                    avgDurationMs = 950.0
                 )
             )
         )
@@ -197,7 +200,7 @@ class TelemetryServiceTests {
 
         assertEquals(3, response.summary.totalRuns)
         assertEquals(1, response.summary.successCount)
-        assertEquals(2, response.summary.errorCount)
+        assertEquals(1, response.summary.errorCount)
         assertEquals(1, response.summary.timeoutCount)
         assertEquals(720, response.summary.totalTokens)
         assertEquals(0.0, response.daily.first().totalCostUsd)
@@ -210,7 +213,7 @@ class TelemetryServiceTests {
         `when`(
             supabaseClient.get(
                 eqValue("telemetry_agent_runs"),
-                eqValue(runsSelect("entrypoint")),
+                eqValue(currentRunsSelect()),
                 eqValue(
                     mapOf(
                         "and" to "(started_at.gte.2026-03-24T00:00Z,started_at.lt.2026-03-25T00:00Z)",
@@ -257,6 +260,21 @@ class TelemetryServiceTests {
 
     @Test
     fun `deve fazer fallback para schema legado com endpoint na tabela de runs`() {
+        `when`(
+            supabaseClient.get(
+                eqValue("telemetry_agent_runs"),
+                eqValue(currentRunsSelect()),
+                eqValue(
+                    mapOf(
+                        "and" to "(started_at.gte.2026-03-24T00:00Z,started_at.lt.2026-03-25T00:00Z)",
+                        "order" to "started_at.desc,run_id.desc",
+                        "limit" to "5"
+                    )
+                ),
+                anyRunsTypeRef()
+            )
+        ).thenThrow(RuntimeException("column telemetry_agent_runs.http_status_code does not exist"))
+
         `when`(
             supabaseClient.get(
                 eqValue("telemetry_agent_runs"),
@@ -322,7 +340,7 @@ class TelemetryServiceTests {
         `when`(
             supabaseClient.get(
                 eqValue("telemetry_agent_runs"),
-                eqValue(runsSelect("entrypoint")),
+                eqValue(currentRunsSelect()),
                 eqValue(
                     mapOf(
                         "and" to "(started_at.gte.2026-03-24T00:00Z,started_at.lt.2026-03-25T00:00Z)",
@@ -349,6 +367,20 @@ class TelemetryServiceTests {
                 )
             )
         )
+
+        `when`(
+            supabaseClient.get(
+                eqValue("telemetry_agent_runs_daily"),
+                eqValue(currentDailyRunsSelect()),
+                eqValue(
+                    mapOf(
+                        "and" to "(day_utc.gte.2026-03-24,day_utc.lte.2026-03-24)",
+                        "order" to "day_utc.asc,agent.asc,status.asc"
+                    )
+                ),
+                anyDailyRunsTypeRef()
+            )
+        ).thenThrow(RuntimeException("column telemetry_agent_runs_daily.runs_count does not exist"))
 
         `when`(
             supabaseClient.get(
@@ -590,6 +622,34 @@ class TelemetryServiceTests {
         p95DurationMs = p95DurationMs
     )
 
+    private fun currentDailyRunRow(
+        dayUtc: String,
+        agent: String,
+        status: String,
+        runCount: Int,
+        llmCallCount: Int,
+        toolCallCount: Int,
+        stageEventCount: Int,
+        totalCostUsd: Double,
+        inputTokens: Int,
+        outputTokens: Int,
+        totalTokens: Int,
+        avgDurationMs: Double
+    ) = SupabaseTelemetryAgentRunsDailyRow(
+        dayUtc = dayUtc,
+        agent = agent,
+        status = status,
+        runCount = runCount,
+        llmCallCount = llmCallCount,
+        toolCallCount = toolCallCount,
+        stageEventCount = stageEventCount,
+        totalCostUsd = totalCostUsd,
+        inputTokens = inputTokens,
+        outputTokens = outputTokens,
+        totalTokens = totalTokens,
+        avgDurationMs = avgDurationMs
+    )
+
     private fun dailyModelRow(
         dayUtc: String,
         agent: String,
@@ -652,5 +712,13 @@ class TelemetryServiceTests {
     private fun dailyRunsSelect(column: String): String {
         val endpointSelect = if (column == "entrypoint") "endpoint:entrypoint" else "endpoint"
         return "day_utc,agent,$endpointSelect,run_count,success_count,error_count,timeout_count,total_cost_usd,total_tokens,avg_duration_ms,p95_duration_ms"
+    }
+
+    private fun currentRunsSelect(): String {
+        return "run_id,request_id,trace_id,agent,endpoint:entrypoint,http_method,http_status:http_status_code,status,timeout,duration_ms,input_tokens:total_input_tokens,output_tokens:total_output_tokens,total_tokens,total_cost_usd,llm_call_count:llm_calls_count,tool_call_count:tool_calls_count,stage_event_count:stage_events_count,error_message,request_context:metadata_json,started_at,finished_at"
+    }
+
+    private fun currentDailyRunsSelect(): String {
+        return "day_utc,agent,status,run_count:runs_count,llm_call_count:llm_calls_count,tool_call_count:tool_calls_count,stage_event_count:stage_events_count,total_cost_usd,input_tokens:total_input_tokens,output_tokens:total_output_tokens,total_tokens,avg_duration_ms,review_rate"
     }
 }

@@ -36,6 +36,8 @@ class TelemetryService(
 ) {
 
     private val log = LoggerFactory.getLogger(TelemetryService::class.java)
+    @Volatile private var runsReadSchema = RunsReadSchema.CURRENT
+    @Volatile private var dailyRunsReadSchema = DailyRunsReadSchema.CURRENT
     @Volatile private var runsTableColumn = RunsPathColumn.ENTRYPOINT
     @Volatile private var dailyRunsColumn = RunsPathColumn.ENTRYPOINT
 
@@ -104,16 +106,29 @@ class TelemetryService(
             .map { day ->
                 val runRows = dailyByDay[day].orEmpty()
                 val modelRows = modelsByDay[day].orEmpty()
+                val hasDailyTokenBreakdown = runRows.any { it.inputTokens != null || it.outputTokens != null }
                 TelemetryMetricsDailyPointResponse(
                     dayUtc = day,
                     runCount = runRows.sumOf { it.runCount },
-                    successCount = runRows.sumOf { it.successCount },
-                    errorCount = runRows.sumOf { it.errorCount },
-                    timeoutCount = runRows.sumOf { it.timeoutCount },
+                    successCount = runRows.sumOf(::resolveSuccessCount),
+                    errorCount = runRows.sumOf(::resolveErrorCount),
+                    timeoutCount = runRows.sumOf(::resolveTimeoutCount),
                     totalCostUsd = round(runRows.sumOf { it.totalCostUsd ?: 0.0 }),
-                    inputTokens = modelRows.sumOf { it.inputTokens ?: 0 },
-                    outputTokens = modelRows.sumOf { it.outputTokens ?: 0 },
-                    totalTokens = modelRows.sumOf { it.totalTokens ?: 0 },
+                    inputTokens = if (hasDailyTokenBreakdown) {
+                        runRows.sumOf { it.inputTokens ?: 0 }
+                    } else {
+                        modelRows.sumOf { it.inputTokens ?: 0 }
+                    },
+                    outputTokens = if (hasDailyTokenBreakdown) {
+                        runRows.sumOf { it.outputTokens ?: 0 }
+                    } else {
+                        modelRows.sumOf { it.outputTokens ?: 0 }
+                    },
+                    totalTokens = if (runRows.any { it.totalTokens != null }) {
+                        runRows.sumOf { it.totalTokens ?: 0 }
+                    } else {
+                        modelRows.sumOf { it.totalTokens ?: 0 }
+                    },
                     averageDurationMs = weightedAverage(runRows.map { it.avgDurationMs to it.runCount }),
                     p95DurationMs = weightedAverage(runRows.map { it.p95DurationMs to it.runCount })
                 )
@@ -125,9 +140,9 @@ class TelemetryService(
                 TelemetryMetricsAgentBreakdownResponse(
                     agent = agentKey,
                     runCount = rows.size,
-                    successCount = rows.count { it.status == STATUS_SUCCESS },
-                    errorCount = rows.count { it.status == STATUS_ERROR },
-                    timeoutCount = rows.count { it.timeout },
+                    successCount = rows.count { isSuccessStatus(it.status) },
+                    errorCount = rows.count { isErrorStatus(it.status, it.timeout) },
+                    timeoutCount = rows.count { isTimeoutStatus(it.status, it.timeout) },
                     totalCostUsd = round(rows.sumOf { it.totalCostUsd ?: 0.0 }),
                     totalTokens = rows.sumOf { it.totalTokens ?: 0 },
                     averageDurationMs = average(rows.mapNotNull { it.durationMs }),
@@ -268,9 +283,50 @@ class TelemetryService(
     }
 
     private fun loadRuns(filters: ResolvedFilters, limit: Int): List<SupabaseTelemetryAgentRunRow> {
+        if (runsReadSchema == RunsReadSchema.LEGACY) {
+            return loadLegacyRuns(filters, limit)
+        }
+
+        return try {
+            loadCurrentRuns(filters, limit)
+        } catch (ex: Exception) {
+            if (!shouldFallbackToLegacyRuns(ex)) {
+                throw ex
+            }
+
+            log.warn(
+                "Falha ao consultar telemetry_agent_runs no schema atual. Tentando fallback legado. erro={}",
+                ex.message
+            )
+            runsReadSchema = RunsReadSchema.LEGACY
+            loadLegacyRuns(filters, limit)
+        }
+    }
+
+    private fun loadCurrentRuns(
+        filters: ResolvedFilters,
+        limit: Int
+    ): List<SupabaseTelemetryAgentRunRow> {
+        val queryParams = mutableMapOf(
+            "and" to "(started_at.gte.${filters.startInclusiveUtc},started_at.lt.${filters.endExclusiveUtc})",
+            "order" to "started_at.desc,run_id.desc",
+            "limit" to limit.toString()
+        )
+        filters.agent?.let { queryParams["agent"] = "eq.$it" }
+        filters.status?.let { queryParams["status"] = "eq.$it" }
+
+        return supabaseClient.get(
+            table = "telemetry_agent_runs",
+            select = buildCurrentRunsSelect(),
+            queryParams = queryParams,
+            typeRef = runsTypeRef
+        ) ?: emptyList()
+    }
+
+    private fun loadLegacyRuns(filters: ResolvedFilters, limit: Int): List<SupabaseTelemetryAgentRunRow> {
         val preferredColumn = runsTableColumn
         return try {
-            getRuns(filters, limit, preferredColumn)
+            getLegacyRuns(filters, limit, preferredColumn)
         } catch (ex: Exception) {
             if (!shouldRetryRunColumn(ex, preferredColumn)) {
                 throw ex
@@ -283,11 +339,11 @@ class TelemetryService(
                 fallbackColumn.dbColumn,
                 ex.message
             )
-            getRuns(filters, limit, fallbackColumn)
+            getLegacyRuns(filters, limit, fallbackColumn)
         }
     }
 
-    private fun getRuns(
+    private fun getLegacyRuns(
         filters: ResolvedFilters,
         limit: Int,
         column: RunsPathColumn
@@ -302,7 +358,7 @@ class TelemetryService(
 
         val rows = supabaseClient.get(
             table = "telemetry_agent_runs",
-            select = buildRunsSelect(column),
+            select = buildLegacyRunsSelect(column),
             queryParams = queryParams,
             typeRef = runsTypeRef
         ) ?: emptyList()
@@ -311,9 +367,45 @@ class TelemetryService(
     }
 
     private fun loadDailyRuns(filters: ResolvedFilters): List<SupabaseTelemetryAgentRunsDailyRow> {
+        if (dailyRunsReadSchema == DailyRunsReadSchema.LEGACY) {
+            return loadLegacyDailyRuns(filters)
+        }
+
+        return try {
+            loadCurrentDailyRuns(filters)
+        } catch (ex: Exception) {
+            if (!shouldFallbackToLegacyDailyRuns(ex)) {
+                throw ex
+            }
+
+            log.warn(
+                "Falha ao consultar telemetry_agent_runs_daily no schema atual. Tentando fallback legado. erro={}",
+                ex.message
+            )
+            dailyRunsReadSchema = DailyRunsReadSchema.LEGACY
+            loadLegacyDailyRuns(filters)
+        }
+    }
+
+    private fun loadCurrentDailyRuns(filters: ResolvedFilters): List<SupabaseTelemetryAgentRunsDailyRow> {
+        val queryParams = mutableMapOf(
+            "and" to "(day_utc.gte.${filters.startDate},day_utc.lte.${filters.endDate})",
+            "order" to "day_utc.asc,agent.asc,status.asc"
+        )
+        filters.agent?.let { queryParams["agent"] = "eq.$it" }
+
+        return supabaseClient.get(
+            table = "telemetry_agent_runs_daily",
+            select = buildCurrentDailyRunsSelect(),
+            queryParams = queryParams,
+            typeRef = dailyRunsTypeRef
+        ) ?: emptyList()
+    }
+
+    private fun loadLegacyDailyRuns(filters: ResolvedFilters): List<SupabaseTelemetryAgentRunsDailyRow> {
         val preferredColumn = dailyRunsColumn
         return try {
-            getDailyRuns(filters, preferredColumn)
+            getLegacyDailyRuns(filters, preferredColumn)
         } catch (ex: Exception) {
             if (!shouldRetryRunColumn(ex, preferredColumn)) {
                 throw ex
@@ -326,11 +418,11 @@ class TelemetryService(
                 fallbackColumn.dbColumn,
                 ex.message
             )
-            getDailyRuns(filters, fallbackColumn)
+            getLegacyDailyRuns(filters, fallbackColumn)
         }
     }
 
-    private fun getDailyRuns(
+    private fun getLegacyDailyRuns(
         filters: ResolvedFilters,
         column: RunsPathColumn
     ): List<SupabaseTelemetryAgentRunsDailyRow> {
@@ -342,7 +434,7 @@ class TelemetryService(
 
         val rows = supabaseClient.get(
             table = "telemetry_agent_runs_daily",
-            select = buildDailyRunsSelect(column),
+            select = buildLegacyDailyRunsSelect(column),
             queryParams = queryParams,
             typeRef = dailyRunsTypeRef
         ) ?: emptyList()
@@ -357,12 +449,17 @@ class TelemetryService(
         )
         filters.agent?.let { queryParams["agent"] = "eq.$it" }
 
-        return supabaseClient.get(
-            table = "telemetry_llm_models_daily",
-            select = llmModelsDailySelect,
-            queryParams = queryParams,
-            typeRef = dailyModelsTypeRef
-        ) ?: emptyList()
+        return try {
+            supabaseClient.get(
+                table = "telemetry_llm_models_daily",
+                select = llmModelsDailySelect,
+                queryParams = queryParams,
+                typeRef = dailyModelsTypeRef
+            ) ?: emptyList()
+        } catch (ex: Exception) {
+            log.warn("Falha ao consultar telemetry_llm_models_daily. Seguindo com lista vazia. erro={}", ex.message)
+            emptyList()
+        }
     }
 
     private fun resolveFilters(
@@ -578,7 +675,33 @@ class TelemetryService(
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toDouble()
     }
 
-    private fun buildRunsSelect(column: RunsPathColumn): String {
+    private fun buildCurrentRunsSelect(): String {
+        return listOf(
+            "run_id",
+            "request_id",
+            "trace_id",
+            "agent",
+            "endpoint:entrypoint",
+            "http_method",
+            "http_status:http_status_code",
+            "status",
+            "timeout",
+            "duration_ms",
+            "input_tokens:total_input_tokens",
+            "output_tokens:total_output_tokens",
+            "total_tokens",
+            "total_cost_usd",
+            "llm_call_count:llm_calls_count",
+            "tool_call_count:tool_calls_count",
+            "stage_event_count:stage_events_count",
+            "error_message",
+            "request_context:metadata_json",
+            "started_at",
+            "finished_at"
+        ).joinToString(",")
+    }
+
+    private fun buildLegacyRunsSelect(column: RunsPathColumn): String {
         return listOf(
             "run_id",
             "request_id",
@@ -604,7 +727,25 @@ class TelemetryService(
         ).joinToString(",")
     }
 
-    private fun buildDailyRunsSelect(column: RunsPathColumn): String {
+    private fun buildCurrentDailyRunsSelect(): String {
+        return listOf(
+            "day_utc",
+            "agent",
+            "status",
+            "run_count:runs_count",
+            "llm_call_count:llm_calls_count",
+            "tool_call_count:tool_calls_count",
+            "stage_event_count:stage_events_count",
+            "total_cost_usd",
+            "input_tokens:total_input_tokens",
+            "output_tokens:total_output_tokens",
+            "total_tokens",
+            "avg_duration_ms",
+            "review_rate"
+        ).joinToString(",")
+    }
+
+    private fun buildLegacyDailyRunsSelect(column: RunsPathColumn): String {
         return listOf(
             "day_utc",
             "agent",
@@ -624,6 +765,33 @@ class TelemetryService(
         return if (column == RunsPathColumn.ENDPOINT) "endpoint" else "endpoint:${column.dbColumn}"
     }
 
+    private fun shouldFallbackToLegacyRuns(ex: Exception): Boolean {
+        val errorText = buildErrorText(ex)
+        return errorText.contains("telemetry_agent_runs") && (
+            errorText.contains("entrypoint") ||
+                errorText.contains("http_status_code") ||
+                errorText.contains("total_input_tokens") ||
+                errorText.contains("total_output_tokens") ||
+                errorText.contains("llm_calls_count") ||
+                errorText.contains("tool_calls_count") ||
+                errorText.contains("stage_events_count") ||
+                errorText.contains("metadata_json")
+            )
+    }
+
+    private fun shouldFallbackToLegacyDailyRuns(ex: Exception): Boolean {
+        val errorText = buildErrorText(ex)
+        return errorText.contains("telemetry_agent_runs_daily") && (
+            errorText.contains("runs_count") ||
+                errorText.contains("llm_calls_count") ||
+                errorText.contains("tool_calls_count") ||
+                errorText.contains("stage_events_count") ||
+                errorText.contains("total_input_tokens") ||
+                errorText.contains("total_output_tokens") ||
+                errorText.contains("review_rate")
+            )
+    }
+
     private fun shouldRetryRunColumn(ex: Exception, attemptedColumn: RunsPathColumn): Boolean {
         val errorText = buildErrorText(ex)
         return errorText.contains(attemptedColumn.dbColumn) &&
@@ -640,6 +808,44 @@ class TelemetryService(
         return "${ex.message.orEmpty()} $responseBody".lowercase()
     }
 
+    private fun resolveSuccessCount(row: SupabaseTelemetryAgentRunsDailyRow): Int {
+        if (row.successCount > 0 || row.errorCount > 0 || row.timeoutCount > 0) {
+            return row.successCount
+        }
+        return if (isSuccessStatus(row.status)) row.runCount else 0
+    }
+
+    private fun resolveErrorCount(row: SupabaseTelemetryAgentRunsDailyRow): Int {
+        if (row.successCount > 0 || row.errorCount > 0 || row.timeoutCount > 0) {
+            return row.errorCount
+        }
+        return if (isErrorStatus(row.status, false)) row.runCount else 0
+    }
+
+    private fun resolveTimeoutCount(row: SupabaseTelemetryAgentRunsDailyRow): Int {
+        if (row.successCount > 0 || row.errorCount > 0 || row.timeoutCount > 0) {
+            return row.timeoutCount
+        }
+        return if (isTimeoutStatus(row.status, false)) row.runCount else 0
+    }
+
+    private fun isSuccessStatus(status: String?): Boolean {
+        val normalized = normalizeOptional(status)?.lowercase() ?: return false
+        return normalized in setOf("success", "completed", "ok", "partial", "parcial", "done")
+    }
+
+    private fun isTimeoutStatus(status: String?, timeoutFlag: Boolean): Boolean {
+        if (timeoutFlag) return true
+        val normalized = normalizeOptional(status)?.lowercase() ?: return false
+        return normalized in setOf("timeout", "timed_out")
+    }
+
+    private fun isErrorStatus(status: String?, timeoutFlag: Boolean): Boolean {
+        if (isTimeoutStatus(status, timeoutFlag)) return false
+        if (isSuccessStatus(status)) return false
+        return normalizeOptional(status) != null
+    }
+
     private data class ResolvedFilters(
         val startDate: LocalDate,
         val endDate: LocalDate,
@@ -649,6 +855,16 @@ class TelemetryService(
         val agent: String?,
         val status: String?
     )
+
+    private enum class RunsReadSchema {
+        CURRENT,
+        LEGACY
+    }
+
+    private enum class DailyRunsReadSchema {
+        CURRENT,
+        LEGACY
+    }
 
     private enum class RunsPathColumn(val dbColumn: String) {
         ENTRYPOINT("entrypoint"),

@@ -32,15 +32,22 @@ data class SupabaseTelemetryAgentRunRow(
 data class SupabaseTelemetryAgentRunsDailyRow(
     @JsonProperty("day_utc") val dayUtc: String,
     val agent: String = "unknown",
-    val endpoint: String = "unknown",
+    val endpoint: String? = null,
+    val status: String? = null,
     @JsonProperty("run_count") val runCount: Int = 0,
     @JsonProperty("success_count") val successCount: Int = 0,
     @JsonProperty("error_count") val errorCount: Int = 0,
     @JsonProperty("timeout_count") val timeoutCount: Int = 0,
+    @JsonProperty("llm_call_count") val llmCallCount: Int = 0,
+    @JsonProperty("tool_call_count") val toolCallCount: Int = 0,
+    @JsonProperty("stage_event_count") val stageEventCount: Int = 0,
     @JsonProperty("total_cost_usd") val totalCostUsd: Double? = null,
+    @JsonProperty("input_tokens") val inputTokens: Int? = null,
+    @JsonProperty("output_tokens") val outputTokens: Int? = null,
     @JsonProperty("total_tokens") val totalTokens: Int? = null,
     @JsonProperty("avg_duration_ms") val avgDurationMs: Double? = null,
-    @JsonProperty("p95_duration_ms") val p95DurationMs: Double? = null
+    @JsonProperty("p95_duration_ms") val p95DurationMs: Double? = null,
+    @JsonProperty("review_rate") val reviewRate: Double? = null
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
