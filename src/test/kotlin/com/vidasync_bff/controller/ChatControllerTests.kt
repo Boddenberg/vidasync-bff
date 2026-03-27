@@ -2,6 +2,9 @@ package com.vidasync_bff.controller
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.vidasync_bff.dto.request.ChatRequest
+import com.vidasync_bff.dto.response.ChatJudgeCriterionResponse
+import com.vidasync_bff.dto.response.ChatJudgeEvaluationResponse
+import com.vidasync_bff.dto.response.ChatJudgeReferenceResponse
 import com.vidasync_bff.dto.response.ChatMemoryResponse
 import com.vidasync_bff.dto.response.ChatResponse
 import com.vidasync_bff.service.ChatService
@@ -11,6 +14,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.web.server.ResponseStatusException
@@ -42,6 +46,10 @@ class ChatControllerTests {
                 hasSummary = false,
                 updatedAt = "2026-03-26T05:25:03.465526Z"
             ),
+            judge = ChatJudgeReferenceResponse(
+                evaluationId = "judge-eval-1",
+                status = "pending"
+            ),
             disclaimer = ChatService.DEFAULT_DISCLAIMER,
             traceId = "trace-chat-1"
         )
@@ -59,9 +67,55 @@ class ChatControllerTests {
             jsonPath("$.conversationId") { value("conv-123") }
             jsonPath("$.intent") { value("conversa_geral") }
             jsonPath("$.memory.totalTurns") { value(4) }
+            jsonPath("$.judge.evaluationId") { value("judge-eval-1") }
+            jsonPath("$.judge.status") { value("pending") }
             jsonPath("$.disclaimer") { value(ChatService.DEFAULT_DISCLAIMER) }
             jsonPath("$.traceId") { value("trace-chat-1") }
         }
+    }
+
+    @Test
+    fun `deve retornar 200 quando judge responder com sucesso`() {
+        val response = ChatJudgeEvaluationResponse(
+            evaluationId = "judge-eval-1",
+            status = "completed",
+            overallScore = 92.5,
+            approved = true,
+            decision = "approved",
+            criterionScores = mapOf(
+                "quality" to 4.8,
+                "coherence" to 4.7
+            ),
+            criterionReasons = mapOf(
+                "quality" to "Resposta clara e bem estruturada.",
+                "coherence" to "A resposta foi consistente com o contexto."
+            ),
+            criteria = listOf(
+                ChatJudgeCriterionResponse(
+                    key = "quality",
+                    score = 4.8,
+                    reason = "Resposta clara e bem estruturada.",
+                    approved = true
+                )
+            ),
+            score = mapOf("overall" to 92.5),
+            approval = mapOf("overall" to true)
+        )
+
+        `when`(chatService.judge("judge-eval-1")).thenReturn(response)
+
+        mockMvc.get("/chat/judge/judge-eval-1")
+            .andExpect {
+                status { isOk() }
+                content { contentTypeCompatibleWith(MediaType.APPLICATION_JSON) }
+                jsonPath("$.evaluationId") { value("judge-eval-1") }
+                jsonPath("$.status") { value("completed") }
+                jsonPath("$.overallScore") { value(92.5) }
+                jsonPath("$.approved") { value(true) }
+                jsonPath("$.criterionScores.quality") { value(4.8) }
+                jsonPath("$.criterionReasons.quality") { value("Resposta clara e bem estruturada.") }
+                jsonPath("$.criteria[0].key") { value("quality") }
+            }
     }
 
     @Test

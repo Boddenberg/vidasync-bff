@@ -6,8 +6,11 @@ import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eT
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemFeignRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteFeignRequest
 import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatJudgeIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayFeignResponse
 import com.vidasync_bff.observability.TraceContext
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.cloud.openfeign.FeignClient
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.PostMapping
@@ -29,6 +32,12 @@ interface AIGatewayFeignClient {
         @RequestBody request: AIGatewayChatFeignRequest,
         @RequestHeader(value = TraceContext.TRACE_HEADER, required = false) traceId: String? = null
     ): AIGatewayChatIntegrationResponse
+
+    @GetMapping(value = ["/v1/openai/chat/judge/{evaluationId}"])
+    fun chatJudge(
+        @PathVariable("evaluationId") evaluationId: String,
+        @RequestHeader(value = TraceContext.TRACE_HEADER, required = false) traceId: String? = null
+    ): AIGatewayChatJudgeIntegrationResponse
 
     @PostMapping(
         value = ["/ai/router"],

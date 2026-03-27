@@ -21,6 +21,39 @@ data class AIGatewayChatIntegrationResponse(
     val providerResponseId: String? = null,
     @JsonProperty("duration_ms")
     val durationMs: Double? = null,
+    val judge: AIGatewayChatJudgeReferenceIntegrationResponse? = null,
     @JsonProperty("trace_id")
     val traceId: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AIGatewayChatJudgeReferenceIntegrationResponse(
+    @JsonProperty("evaluation_id")
+    val evaluationId: String? = null,
+    val status: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AIGatewayChatJudgeCriterionIntegrationResponse(
+    val score: Double? = null,
+    val reason: String? = null,
+    val approved: Boolean? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AIGatewayChatJudgeIntegrationResponse(
+    @JsonProperty("evaluation_id")
+    val evaluationId: String? = null,
+    val status: String? = null,
+    @JsonProperty("overall_score")
+    val overallScore: Double? = null,
+    val approved: Boolean? = null,
+    val decision: String? = null,
+    @JsonProperty("criterion_scores")
+    val criterionScores: Map<String, Any?> = emptyMap(),
+    @JsonProperty("criterion_reasons")
+    val criterionReasons: Map<String, Any?> = emptyMap(),
+    val criteria: Map<String, AIGatewayChatJudgeCriterionIntegrationResponse> = emptyMap(),
+    val score: Map<String, Any?> = emptyMap(),
+    val approval: Map<String, Any?> = emptyMap()
 )

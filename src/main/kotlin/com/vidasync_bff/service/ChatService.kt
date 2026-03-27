@@ -1,6 +1,9 @@
 package com.vidasync_bff.service
 
 import com.vidasync_bff.dto.request.ChatRequest
+import com.vidasync_bff.dto.response.ChatJudgeCriterionResponse
+import com.vidasync_bff.dto.response.ChatJudgeEvaluationResponse
+import com.vidasync_bff.dto.response.ChatJudgeReferenceResponse
 import com.vidasync_bff.dto.response.ChatMemoryResponse
 import com.vidasync_bff.dto.response.ChatResponse
 import com.vidasync_bff.integration.aigateway.AIGatewayIntegration
@@ -12,6 +15,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.web.server.ResponseStatusException
+import java.util.UUID
 
 @Service
 class ChatService(
@@ -38,6 +42,9 @@ class ChatService(
 
         val traceId = TraceContext.current()
         val conversationId = request.conversationId?.trim()?.takeIf { it.isNotBlank() }
+        val normalizedUserId = userId?.trim()?.takeIf { it.isNotBlank() }
+        val requestId = AgentTelemetryContext.currentRequestId()
+        val messageId = UUID.randomUUID().toString().replace("-", "")
 
         log.info(
             "chat.started trace_id={} userIdPresent={} promptChars={} hasConversationId={}",
@@ -52,7 +59,10 @@ class ChatService(
                 AIGatewayChatIntegrationRequest(
                     prompt = prompt,
                     conversationId = conversationId,
-                    traceId = traceId
+                    traceId = traceId,
+                    userId = normalizedUserId,
+                    requestId = requestId,
+                    messageId = messageId
                 )
             )
         } catch (ex: AIGatewayIntegrationException) {
@@ -97,19 +107,27 @@ class ChatService(
             needsReview = needsReview,
             warnings = warnings,
             memory = memory.toPublicMemoryResponse(),
+            judge = gatewayResponse.judge?.evaluationId?.let {
+                ChatJudgeReferenceResponse(
+                    evaluationId = it,
+                    status = toStringValue(gatewayResponse.judge.status)
+                )
+            },
             disclaimer = DEFAULT_DISCLAIMER,
             traceId = gatewayResponse.traceId ?: traceId
         )
 
         log.info(
-            "chat.completed trace_id={} userIdPresent={} conversationId={} intent={} needsReview={} warnings={} totalTurns={}",
+            "chat.completed trace_id={} userIdPresent={} conversationId={} intent={} needsReview={} warnings={} totalTurns={} judgeEvaluationId={} judgeStatus={}",
             response.traceId,
             !userId.isNullOrBlank(),
             response.conversationId,
             response.intent,
             response.needsReview,
             response.warnings?.size ?: 0,
-            response.memory?.totalTurns
+            response.memory?.totalTurns,
+            response.judge?.evaluationId,
+            response.judge?.status
         )
         AgentTelemetryContext.recordStageEvent(
             stage = "chat_completed",
@@ -119,11 +137,69 @@ class ChatService(
             payload = mapOf(
                 "conversationIdPresent" to !response.conversationId.isNullOrBlank(),
                 "warningsCount" to (response.warnings?.size ?: 0),
-                "needsReview" to response.needsReview
+                "needsReview" to response.needsReview,
+                "judgeStatus" to response.judge?.status
             )
         )
 
         return response
+    }
+
+    fun judge(evaluationId: String): ChatJudgeEvaluationResponse {
+        val normalizedEvaluationId = evaluationId.trim().takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("evaluationId e obrigatorio")
+
+        val gatewayResponse = try {
+            aiGatewayIntegration.chatJudge(
+                evaluationId = normalizedEvaluationId,
+                traceId = TraceContext.current()
+            )
+        } catch (ex: AIGatewayIntegrationException) {
+            AgentTelemetryContext.recordStageEvent(
+                stage = "chat_judge_gateway",
+                eventType = "error",
+                status = "error",
+                detail = ex.message,
+                payload = mapOf("evaluationId" to normalizedEvaluationId)
+            )
+            throw mapJudgeFailure(ex)
+        }
+
+        val criterionScores = gatewayResponse.criterionScores.entries.associate { (key, value) ->
+            key to toDoubleValue(value)
+        }
+        val criterionReasons = gatewayResponse.criterionReasons.entries.mapNotNull { (key, value) ->
+            toStringValue(value)?.let { key to it }
+        }.toMap()
+
+        val criteria = (
+            gatewayResponse.criteria.keys +
+                criterionScores.keys +
+                criterionReasons.keys
+            ).distinct().map { key ->
+                val criterion = gatewayResponse.criteria[key]
+                val score = criterion?.score ?: criterionScores[key]
+                val reason = criterion?.reason ?: criterionReasons[key]
+                ChatJudgeCriterionResponse(
+                    key = key,
+                    score = score,
+                    reason = reason,
+                    approved = criterion?.approved
+                )
+            }
+
+        return ChatJudgeEvaluationResponse(
+            evaluationId = gatewayResponse.evaluationId ?: normalizedEvaluationId,
+            status = toStringValue(gatewayResponse.status),
+            overallScore = gatewayResponse.overallScore,
+            approved = gatewayResponse.approved,
+            decision = toStringValue(gatewayResponse.decision),
+            criterionScores = criterionScores,
+            criterionReasons = criterionReasons,
+            criteria = criteria,
+            score = gatewayResponse.score,
+            approval = gatewayResponse.approval
+        )
     }
 
     private fun mapGatewayFailure(ex: AIGatewayIntegrationException): ResponseStatusException {
@@ -152,6 +228,37 @@ class ChatService(
                 ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
                     "Nao foi possivel consultar a IA no momento."
+                )
+            }
+        }
+    }
+
+    private fun mapJudgeFailure(ex: AIGatewayIntegrationException): ResponseStatusException {
+        val statusCode = ex.statusCode
+        return when (statusCode) {
+            400, 422 -> ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Nao foi possivel consultar a avaliacao do judge."
+            )
+            404 -> ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "Avaliacao do judge nao encontrada."
+            )
+            408, 504 -> ResponseStatusException(
+                HttpStatus.GATEWAY_TIMEOUT,
+                "A avaliacao do judge demorou mais que o esperado. Tente novamente."
+            )
+            else -> {
+                log.error(
+                    "chat.judge_gateway_failure statusCode={} responseBody={} message={}",
+                    statusCode,
+                    ex.responseBody,
+                    ex.message,
+                    ex
+                )
+                ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "Nao foi possivel consultar a avaliacao do judge no momento."
                 )
             }
         }

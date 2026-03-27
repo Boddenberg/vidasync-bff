@@ -9,6 +9,7 @@ import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eT
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
 import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatJudgeIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 import com.vidasync_bff.integration.aigateway.translator.AIGatewayIntegrationTranslator
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -31,7 +32,31 @@ class AIGatewayLegacyIntegration(
                 legacyClient.chat(
                     prompt = request.prompt,
                     conversationId = request.conversationId,
-                    traceId = translator.resolveTraceId(request.traceId)
+                    traceId = translator.resolveTraceId(request.traceId),
+                    userId = request.userId,
+                    requestId = request.requestId,
+                    messageId = request.messageId
+                )
+            )
+        } catch (e: AIGatewayClient.AIGatewayRequestException) {
+            throw AIGatewayIntegrationException(
+                message = e.message ?: "Falha ao chamar AI Gateway",
+                statusCode = e.statusCode,
+                responseBody = e.responseBody,
+                cause = e
+            )
+        }
+    }
+
+    override fun chatJudge(
+        evaluationId: String,
+        traceId: String?
+    ): AIGatewayChatJudgeIntegrationResponse {
+        return try {
+            translator.toChatJudgeIntegrationResponse(
+                legacyClient.chatJudge(
+                    evaluationId = evaluationId,
+                    traceId = translator.resolveTraceId(traceId)
                 )
             )
         } catch (e: AIGatewayClient.AIGatewayRequestException) {

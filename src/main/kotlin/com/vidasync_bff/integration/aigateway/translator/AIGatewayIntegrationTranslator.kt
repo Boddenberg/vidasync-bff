@@ -1,5 +1,7 @@
 package com.vidasync_bff.integration.aigateway.translator
 
+import com.vidasync_bff.dto.ai.AIGatewayChatJudgeReferenceResponse
+import com.vidasync_bff.dto.ai.AIGatewayOpenAIChatJudgeResponse
 import com.vidasync_bff.dto.ai.AIGatewayOpenAIChatResponse
 import com.vidasync_bff.dto.ai.AIGatewayRouteResponse
 import com.vidasync_bff.integration.aigateway.request.AIGatewayChatFeignRequest
@@ -13,6 +15,9 @@ import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImag
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteFeignRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
 import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatJudgeCriterionIntegrationResponse
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatJudgeIntegrationResponse
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatJudgeReferenceIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayFeignResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 import com.vidasync_bff.observability.TraceContext
@@ -44,7 +49,10 @@ class AIGatewayIntegrationTranslator {
         return AIGatewayChatFeignRequest(
             prompt = request.prompt,
             conversationId = request.conversationId,
-            traceId = resolveTraceId(request.traceId)
+            traceId = resolveTraceId(request.traceId),
+            userId = request.userId,
+            requestId = request.requestId,
+            messageId = request.messageId
         )
     }
 
@@ -155,7 +163,41 @@ class AIGatewayIntegrationTranslator {
             metadata = response.metadata,
             providerResponseId = response.providerResponseId,
             durationMs = response.durationMs,
+            judge = toChatJudgeReferenceIntegrationResponse(response.judge),
             traceId = response.traceId
+        )
+    }
+
+    fun toChatJudgeIntegrationResponse(response: AIGatewayOpenAIChatJudgeResponse): AIGatewayChatJudgeIntegrationResponse {
+        return AIGatewayChatJudgeIntegrationResponse(
+            evaluationId = response.evaluationId,
+            status = response.status,
+            overallScore = response.overallScore,
+            approved = response.approved,
+            decision = response.decision,
+            criterionScores = response.criterionScores,
+            criterionReasons = response.criterionReasons,
+            criteria = response.criteria.mapValues { (_, value) ->
+                AIGatewayChatJudgeCriterionIntegrationResponse(
+                    score = value.score,
+                    reason = value.reason,
+                    approved = value.approved
+                )
+            },
+            score = response.score,
+            approval = response.approval
+        )
+    }
+
+    private fun toChatJudgeReferenceIntegrationResponse(
+        response: AIGatewayChatJudgeReferenceResponse?
+    ): AIGatewayChatJudgeReferenceIntegrationResponse? {
+        if (response == null) {
+            return null
+        }
+        return AIGatewayChatJudgeReferenceIntegrationResponse(
+            evaluationId = response.evaluationId,
+            status = response.status
         )
     }
 }

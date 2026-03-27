@@ -17,7 +17,13 @@ data class AIGatewayChatFeignRequest(
     @JsonProperty("conversation_id")
     val conversationId: String? = null,
     @JsonProperty("trace_id")
-    val traceId: String? = null
+    val traceId: String? = null,
+    @JsonProperty("user_id")
+    val userId: String? = null,
+    @JsonProperty("request_id")
+    val requestId: String? = null,
+    @JsonProperty("message_id")
+    val messageId: String? = null
 )
 
 data class AIGatewayPipelinePlanoImagemFeignRequest(

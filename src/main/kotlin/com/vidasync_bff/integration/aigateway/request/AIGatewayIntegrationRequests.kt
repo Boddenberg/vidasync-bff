@@ -11,7 +11,10 @@ data class AIGatewayRouteIntegrationRequest(
 data class AIGatewayChatIntegrationRequest(
     val prompt: String,
     val conversationId: String? = null,
-    val traceId: String? = null
+    val traceId: String? = null,
+    val userId: String? = null,
+    val requestId: String? = null,
+    val messageId: String? = null
 )
 
 data class AIGatewayPipelinePlanoImagemIntegrationRequest(

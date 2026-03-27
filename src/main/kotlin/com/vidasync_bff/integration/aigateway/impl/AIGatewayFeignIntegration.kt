@@ -9,6 +9,7 @@ import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eT
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
 import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatJudgeIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 import com.vidasync_bff.integration.aigateway.translator.AIGatewayIntegrationTranslator
 import com.vidasync_bff.observability.AgentTelemetryContext
@@ -43,6 +44,9 @@ class AIGatewayFeignIntegration(
             add("prompt")
             if (!request.conversationId.isNullOrBlank()) add("conversation_id")
             if (!resolvedTraceId.isNullOrBlank()) add("trace_id")
+            if (!request.userId.isNullOrBlank()) add("user_id")
+            if (!request.requestId.isNullOrBlank()) add("request_id")
+            if (!request.messageId.isNullOrBlank()) add("message_id")
         }
         val startedNs = System.nanoTime()
         log.info(
@@ -144,6 +148,67 @@ class AIGatewayFeignIntegration(
             )
             throw AIGatewayIntegrationException(
                 message = "Falha ao chamar AI Gateway em openai_chat: ${e.message}",
+                cause = e
+            )
+        }
+    }
+
+    override fun chatJudge(
+        evaluationId: String,
+        traceId: String?
+    ): AIGatewayChatJudgeIntegrationResponse {
+        val resolvedTraceId = translator.resolveTraceId(traceId)
+        val startedNs = System.nanoTime()
+        log.info(
+            "ai_gateway.request provider=feign trace_id={} operation={} path={} evaluation_id={}",
+            resolvedTraceId,
+            "openai_chat_judge",
+            "/v1/openai/chat/judge/{evaluationId}",
+            evaluationId
+        )
+
+        return try {
+            val response = feignClient.chatJudge(
+                evaluationId = evaluationId,
+                traceId = resolvedTraceId
+            )
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            log.info(
+                "ai_gateway.response provider=feign trace_id={} operation={} path={} status={} duration_ms={}",
+                resolvedTraceId,
+                "openai_chat_judge",
+                "/v1/openai/chat/judge/{evaluationId}",
+                response.status,
+                String.format(Locale.US, "%.4f", durationMs)
+            )
+            response
+        } catch (e: AIGatewayIntegrationException) {
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            log.error(
+                "ai_gateway.error provider=feign trace_id={} operation={} path={} status_code={} duration_ms={} body={}",
+                resolvedTraceId,
+                "openai_chat_judge",
+                "/v1/openai/chat/judge/{evaluationId}",
+                e.statusCode,
+                String.format(Locale.US, "%.4f", durationMs),
+                e.responseBody,
+                e
+            )
+            throw e
+        } catch (e: Exception) {
+            val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
+            log.error(
+                "ai_gateway.error provider=feign trace_id={} operation={} path={} duration_ms={} error_type={} error_message={}",
+                resolvedTraceId,
+                "openai_chat_judge",
+                "/v1/openai/chat/judge/{evaluationId}",
+                String.format(Locale.US, "%.4f", durationMs),
+                e::class.java.simpleName,
+                e.message,
+                e
+            )
+            throw AIGatewayIntegrationException(
+                message = "Falha ao chamar AI Gateway em openai_chat_judge: ${e.message}",
                 cause = e
             )
         }

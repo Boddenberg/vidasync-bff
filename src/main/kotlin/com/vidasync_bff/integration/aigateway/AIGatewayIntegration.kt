@@ -6,10 +6,13 @@ import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoE2eT
 import com.vidasync_bff.integration.aigateway.request.AIGatewayPipelinePlanoImagemIntegrationRequest
 import com.vidasync_bff.integration.aigateway.request.AIGatewayRouteIntegrationRequest
 import com.vidasync_bff.integration.aigateway.response.AIGatewayChatIntegrationResponse
+import com.vidasync_bff.integration.aigateway.response.AIGatewayChatJudgeIntegrationResponse
 import com.vidasync_bff.integration.aigateway.response.AIGatewayIntegrationResponse
 
 interface AIGatewayIntegration {
     fun chat(request: AIGatewayChatIntegrationRequest): AIGatewayChatIntegrationResponse
+
+    fun chatJudge(evaluationId: String, traceId: String? = null): AIGatewayChatJudgeIntegrationResponse
 
     fun route(request: AIGatewayRouteIntegrationRequest): AIGatewayIntegrationResponse
 
