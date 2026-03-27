@@ -2,6 +2,7 @@ package com.vidasync_bff.controller
 
 import com.vidasync_bff.dto.response.LlmJudgeMetricsBucketResponse
 import com.vidasync_bff.dto.response.LlmJudgeMetricsCountResponse
+import com.vidasync_bff.dto.response.LlmJudgeCriterionScoreResponse
 import com.vidasync_bff.dto.response.LlmJudgeMetricsDailyPointResponse
 import com.vidasync_bff.dto.response.LlmJudgeMetricsFiltersResponse
 import com.vidasync_bff.dto.response.LlmJudgeMetricsResponse
@@ -49,6 +50,12 @@ class InternalAdminLlmJudgeMetricsControllerTests {
                 failureRatePercent = 8.33,
                 approvalRatePercent = 80.0,
                 averageOverallScore = 0.91,
+                averageCriteriaScores = listOf(
+                    LlmJudgeCriterionScoreResponse(
+                        key = "quality",
+                        score = 4.8
+                    )
+                ),
                 averageSourceDurationMs = 1320.4,
                 averageJudgeDurationMs = 210.5,
                 averageSourceTotalTokens = 512.0,
@@ -69,6 +76,7 @@ class InternalAdminLlmJudgeMetricsControllerTests {
                     failureRatePercent = 8.33,
                     approvalRatePercent = 80.0,
                     averageOverallScore = 0.91,
+                    averageCriteriaScores = emptyList(),
                     averageSourceDurationMs = 1320.4,
                     averageJudgeDurationMs = 210.5,
                     averageSourceTotalTokens = 512.0,
@@ -104,10 +112,15 @@ class InternalAdminLlmJudgeMetricsControllerTests {
                 LlmJudgeRecentEvaluationResponse(
                     evaluationId = "eval-1",
                     createdAt = "2026-03-26T18:00:00Z",
+                    conversationId = "conv-eval-1",
+                    userId = "user-eval-1",
+                    requestId = "req-eval-1",
+                    messageId = "msg-eval-1",
                     feature = "nutrition",
                     judgeStatus = "completed",
                     judgeDecision = "approved",
                     judgeOverallScore = 0.98,
+                    judgeSummary = "Resposta boa.",
                     idioma = "pt-BR",
                     pipeline = "image",
                     handler = "calories",
@@ -115,7 +128,10 @@ class InternalAdminLlmJudgeMetricsControllerTests {
                     sourceDurationMs = 1200.0,
                     judgeDurationMs = 180.0,
                     sourceTotalTokens = 480,
-                    judgeTotalTokens = 120
+                    judgeTotalTokens = 120,
+                    criteria = emptyList(),
+                    judgeImprovements = emptyList(),
+                    judgeRejectionReasons = emptyList()
                 )
             )
         )
@@ -147,6 +163,8 @@ class InternalAdminLlmJudgeMetricsControllerTests {
             jsonPath("$.metrics.byFeature[0].key") { value("nutrition") }
             jsonPath("$.metrics.topRejectionReasons[0].key") { value("falta contexto") }
             jsonPath("$.metrics.recentEvaluations[0].evaluationId") { value("eval-1") }
+            jsonPath("$.metrics.recentEvaluations[0].conversationId") { value("conv-eval-1") }
+            jsonPath("$.metrics.recentEvaluations[0].requestId") { value("req-eval-1") }
         }
     }
 

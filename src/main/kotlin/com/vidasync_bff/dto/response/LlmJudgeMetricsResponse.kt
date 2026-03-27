@@ -7,6 +7,10 @@ import com.fasterxml.jackson.annotation.JsonProperty
 data class SupabaseLlmJudgeEvaluationRow(
     @JsonProperty("evaluation_id") val evaluationId: String,
     @JsonProperty("created_at") val createdAt: String,
+    @JsonProperty("conversation_id") val conversationId: String? = null,
+    @JsonProperty("user_id") val userId: String? = null,
+    @JsonProperty("request_id") val requestId: String? = null,
+    @JsonProperty("message_id") val messageId: String? = null,
     val feature: String,
     @JsonProperty("judge_status") val judgeStatus: String,
     val idioma: String = "pt-BR",
@@ -19,7 +23,17 @@ data class SupabaseLlmJudgeEvaluationRow(
     @JsonProperty("judge_total_tokens") val judgeTotalTokens: Int? = null,
     @JsonProperty("judge_overall_score") val judgeOverallScore: Double? = null,
     @JsonProperty("judge_decision") val judgeDecision: String? = null,
-    @JsonProperty("judge_rejection_reasons") val judgeRejectionReasons: List<Any?> = emptyList()
+    @JsonProperty("judge_summary") val judgeSummary: String? = null,
+    @JsonProperty("judge_scores") val judgeScores: Map<String, Any?> = emptyMap(),
+    @JsonProperty("judge_improvements") val judgeImprovements: List<Any?> = emptyList(),
+    @JsonProperty("judge_rejection_reasons") val judgeRejectionReasons: List<Any?> = emptyList(),
+    @JsonProperty("judge_result") val judgeResult: Map<String, Any?>? = null
+)
+
+data class LlmJudgeCriterionScoreResponse(
+    val key: String,
+    val score: Double?,
+    val reason: String? = null
 )
 
 data class LlmJudgeMetricsFiltersResponse(
@@ -46,6 +60,7 @@ data class LlmJudgeMetricsSummaryResponse(
     val failureRatePercent: Double,
     val approvalRatePercent: Double?,
     val averageOverallScore: Double?,
+    val averageCriteriaScores: List<LlmJudgeCriterionScoreResponse>,
     val averageSourceDurationMs: Double?,
     val averageJudgeDurationMs: Double?,
     val averageSourceTotalTokens: Double?,
@@ -66,6 +81,7 @@ data class LlmJudgeMetricsBucketResponse(
     val failureRatePercent: Double,
     val approvalRatePercent: Double?,
     val averageOverallScore: Double?,
+    val averageCriteriaScores: List<LlmJudgeCriterionScoreResponse>,
     val averageSourceDurationMs: Double?,
     val averageJudgeDurationMs: Double?,
     val averageSourceTotalTokens: Double?,
@@ -94,10 +110,15 @@ data class LlmJudgeMetricsCountResponse(
 data class LlmJudgeRecentEvaluationResponse(
     val evaluationId: String,
     val createdAt: String,
+    val conversationId: String?,
+    val userId: String?,
+    val requestId: String?,
+    val messageId: String?,
     val feature: String,
     val judgeStatus: String,
     val judgeDecision: String?,
     val judgeOverallScore: Double?,
+    val judgeSummary: String?,
     val idioma: String,
     val pipeline: String?,
     val handler: String?,
@@ -105,7 +126,10 @@ data class LlmJudgeRecentEvaluationResponse(
     val sourceDurationMs: Double?,
     val judgeDurationMs: Double?,
     val sourceTotalTokens: Int?,
-    val judgeTotalTokens: Int?
+    val judgeTotalTokens: Int?,
+    val criteria: List<LlmJudgeCriterionScoreResponse>,
+    val judgeImprovements: List<String>,
+    val judgeRejectionReasons: List<String>
 )
 
 data class LlmJudgeMetricsResponse(

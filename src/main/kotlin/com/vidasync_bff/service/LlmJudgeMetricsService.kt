@@ -3,6 +3,7 @@ package com.vidasync_bff.service
 import com.vidasync_bff.client.SupabaseClient
 import com.vidasync_bff.dto.response.LlmJudgeMetricsBucketResponse
 import com.vidasync_bff.dto.response.LlmJudgeMetricsCountResponse
+import com.vidasync_bff.dto.response.LlmJudgeCriterionScoreResponse
 import com.vidasync_bff.dto.response.LlmJudgeMetricsDailyPointResponse
 import com.vidasync_bff.dto.response.LlmJudgeMetricsFiltersResponse
 import com.vidasync_bff.dto.response.LlmJudgeMetricsResponse
@@ -32,6 +33,10 @@ class LlmJudgeMetricsService(
     private val selectColumns = listOf(
         "evaluation_id",
         "created_at",
+        "conversation_id",
+        "user_id",
+        "request_id",
+        "message_id",
         "feature",
         "judge_status",
         "idioma",
@@ -44,7 +49,11 @@ class LlmJudgeMetricsService(
         "judge_total_tokens",
         "judge_overall_score",
         "judge_decision",
-        "judge_rejection_reasons"
+        "judge_summary",
+        "judge_scores",
+        "judge_improvements",
+        "judge_rejection_reasons",
+        "judge_result"
     ).joinToString(",")
 
     fun getMetrics(
@@ -116,6 +125,7 @@ class LlmJudgeMetricsService(
                 failureRatePercent = summaryAggregates.failureRatePercent,
                 approvalRatePercent = summaryAggregates.approvalRatePercent,
                 averageOverallScore = summaryAggregates.averageOverallScore,
+                averageCriteriaScores = summaryAggregates.averageCriteriaScores,
                 averageSourceDurationMs = summaryAggregates.averageSourceDurationMs,
                 averageJudgeDurationMs = summaryAggregates.averageJudgeDurationMs,
                 averageSourceTotalTokens = summaryAggregates.averageSourceTotalTokens,
@@ -177,6 +187,7 @@ class LlmJudgeMetricsService(
                     failureRatePercent = aggregates.failureRatePercent,
                     approvalRatePercent = aggregates.approvalRatePercent,
                     averageOverallScore = aggregates.averageOverallScore,
+                    averageCriteriaScores = aggregates.averageCriteriaScores,
                     averageSourceDurationMs = aggregates.averageSourceDurationMs,
                     averageJudgeDurationMs = aggregates.averageJudgeDurationMs,
                     averageSourceTotalTokens = aggregates.averageSourceTotalTokens,
@@ -223,7 +234,7 @@ class LlmJudgeMetricsService(
             .asSequence()
             .flatMap { row ->
                 row.judgeRejectionReasons.asSequence()
-                    .mapNotNull { value -> value?.toString()?.trim()?.takeIf { it.isNotBlank() } }
+                    .mapNotNull(::normalizeRejectionReason)
             }
             .groupingBy { it }
             .eachCount()
@@ -237,10 +248,15 @@ class LlmJudgeMetricsService(
         return LlmJudgeRecentEvaluationResponse(
             evaluationId = row.evaluationId,
             createdAt = row.createdAt,
+            conversationId = row.conversationId,
+            userId = row.userId,
+            requestId = row.requestId,
+            messageId = row.messageId,
             feature = row.feature,
             judgeStatus = row.judgeStatus,
             judgeDecision = row.judgeDecision,
             judgeOverallScore = roundOrNull(row.judgeOverallScore),
+            judgeSummary = normalizeText(row.judgeSummary),
             idioma = row.idioma,
             pipeline = row.pipeline,
             handler = row.handler,
@@ -248,7 +264,10 @@ class LlmJudgeMetricsService(
             sourceDurationMs = roundOrNull(row.sourceDurationMs),
             judgeDurationMs = roundOrNull(row.judgeDurationMs),
             sourceTotalTokens = row.sourceTotalTokens,
-            judgeTotalTokens = row.judgeTotalTokens
+            judgeTotalTokens = row.judgeTotalTokens,
+            criteria = extractCriteriaDetails(row),
+            judgeImprovements = normalizeTextList(row.judgeImprovements),
+            judgeRejectionReasons = row.judgeRejectionReasons.mapNotNull(::normalizeRejectionReason)
         )
     }
 
@@ -271,6 +290,7 @@ class LlmJudgeMetricsService(
             failureRatePercent = percentageOrZero(failed, total),
             approvalRatePercent = percentageOrNull(approved, approved + rejected),
             averageOverallScore = averageOf(rows.mapNotNull { it.judgeOverallScore }),
+            averageCriteriaScores = buildAverageCriteriaScores(rows),
             averageSourceDurationMs = averageOf(rows.mapNotNull { it.sourceDurationMs }),
             averageJudgeDurationMs = averageOf(rows.mapNotNull { it.judgeDurationMs }),
             averageSourceTotalTokens = averageOf(rows.mapNotNull { it.sourceTotalTokens?.toDouble() }),
@@ -353,6 +373,103 @@ class LlmJudgeMetricsService(
         return normalizeOptional(value) ?: "nao_informado"
     }
 
+    private fun buildAverageCriteriaScores(rows: List<SupabaseLlmJudgeEvaluationRow>): List<LlmJudgeCriterionScoreResponse> {
+        return CRITERION_ORDER.mapNotNull { key ->
+            val average = averageOf(
+                rows.mapNotNull { extractCriteriaScores(it)[key] }
+            )
+            average?.let { LlmJudgeCriterionScoreResponse(key = key, score = it) }
+        }
+    }
+
+    private fun extractCriteriaDetails(row: SupabaseLlmJudgeEvaluationRow): List<LlmJudgeCriterionScoreResponse> {
+        val criteriaDetails = row.judgeResult?.get("criteria") as? Map<*, *>
+
+        val detailedCriteria = CRITERION_ORDER.mapNotNull { key ->
+            val criterion = criteriaDetails?.get(key) as? Map<*, *>
+            val score = toDoubleValue(criterion?.get("score"))
+            val reason = normalizeText(criterion?.get("reason")?.toString())
+            if (score == null && reason == null) {
+                null
+            } else {
+                LlmJudgeCriterionScoreResponse(
+                    key = key,
+                    score = roundOrNull(score),
+                    reason = reason
+                )
+            }
+        }
+
+        if (detailedCriteria.isNotEmpty()) {
+            return detailedCriteria
+        }
+
+        return extractCriteriaScores(row).map { (key, score) ->
+            LlmJudgeCriterionScoreResponse(
+                key = key,
+                score = roundOrNull(score)
+            )
+        }
+    }
+
+    private fun extractCriteriaScores(row: SupabaseLlmJudgeEvaluationRow): Map<String, Double> {
+        val resultScores = ((row.judgeResult?.get("score") as? Map<*, *>)?.get("criteria_scores") as? Map<*, *>)
+            ?.entries
+            ?.mapNotNull { (rawKey, rawValue) ->
+                val key = normalizeCriterionKey(rawKey?.toString()) ?: return@mapNotNull null
+                val score = toDoubleValue(rawValue) ?: return@mapNotNull null
+                key to score
+            }
+            ?.toMap()
+            .orEmpty()
+
+        if (resultScores.isNotEmpty()) {
+            return resultScores
+        }
+
+        return row.judgeScores.entries
+            .mapNotNull { (rawKey, rawValue) ->
+                val key = normalizeCriterionKey(rawKey) ?: return@mapNotNull null
+                val score = toDoubleValue(rawValue) ?: return@mapNotNull null
+                key to score
+            }
+            .toMap()
+    }
+
+    private fun normalizeCriterionKey(value: String?): String? {
+        val normalized = normalizeOptional(value) ?: return null
+        return normalized.takeIf { it in CRITERION_ORDER }
+    }
+
+    private fun normalizeRejectionReason(value: Any?): String? {
+        val mapValue = value as? Map<*, *>
+        val message = normalizeText(mapValue?.get("message")?.toString())
+        if (message != null) {
+            return message
+        }
+        val code = normalizeText(mapValue?.get("code")?.toString())
+        if (code != null) {
+            return code
+        }
+        return normalizeText(value?.toString())
+    }
+
+    private fun normalizeTextList(values: List<Any?>): List<String> {
+        return values.mapNotNull { normalizeText(it?.toString()) }
+    }
+
+    private fun normalizeText(value: String?): String? {
+        return value?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun toDoubleValue(value: Any?): Double? {
+        return when (value) {
+            is Number -> value.toDouble()
+            is String -> value.trim().replace(",", ".").toDoubleOrNull()
+            else -> null
+        }
+    }
+
     private fun validateInternalAccess(actorUserId: String) {
         if (actorUserId.trim().isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "header X-User-Id obrigatorio para auditoria")
@@ -414,6 +531,7 @@ class LlmJudgeMetricsService(
         val failureRatePercent: Double,
         val approvalRatePercent: Double?,
         val averageOverallScore: Double?,
+        val averageCriteriaScores: List<LlmJudgeCriterionScoreResponse>,
         val averageSourceDurationMs: Double?,
         val averageJudgeDurationMs: Double?,
         val averageSourceTotalTokens: Double?,
@@ -428,5 +546,16 @@ class LlmJudgeMetricsService(
         private const val STATUS_FAILED = "failed"
         private const val DECISION_APPROVED = "approved"
         private const val DECISION_REJECTED = "rejected"
+        private val CRITERION_ORDER = listOf(
+            "quality",
+            "coherence",
+            "context",
+            "correctness",
+            "efficiency",
+            "fidelity",
+            "usefulness",
+            "safety",
+            "tone_of_voice"
+        )
     }
 }

@@ -1,6 +1,7 @@
 package com.vidasync_bff.service
 
 import com.vidasync_bff.client.SupabaseClient
+import com.vidasync_bff.dto.response.LlmJudgeCriterionScoreResponse
 import com.vidasync_bff.dto.response.SupabaseLlmJudgeEvaluationRow
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers
@@ -24,7 +25,7 @@ class LlmJudgeMetricsServiceTests {
             supabaseClient.get(
                 eqValue("llm_judge_evaluations"),
                 eqValue(
-                    "evaluation_id,created_at,feature,judge_status,idioma,pipeline,handler,source_model,source_duration_ms,source_total_tokens,judge_duration_ms,judge_total_tokens,judge_overall_score,judge_decision,judge_rejection_reasons"
+                    "evaluation_id,created_at,conversation_id,user_id,request_id,message_id,feature,judge_status,idioma,pipeline,handler,source_model,source_duration_ms,source_total_tokens,judge_duration_ms,judge_total_tokens,judge_overall_score,judge_decision,judge_summary,judge_scores,judge_improvements,judge_rejection_reasons,judge_result"
                 ),
                 eqValue(
                     mapOf(
@@ -47,7 +48,21 @@ class LlmJudgeMetricsServiceTests {
                     sourceDurationMs = 1500.0,
                     judgeDurationMs = 300.0,
                     sourceTotalTokens = 600,
-                    judgeTotalTokens = 150
+                    judgeTotalTokens = 150,
+                    judgeSummary = "Resposta adequada e objetiva.",
+                    judgeScores = mapOf(
+                        "quality" to 5,
+                        "coherence" to 4,
+                        "context" to 5
+                    ),
+                    judgeImprovements = listOf("Adicionar um exemplo pratico."),
+                    judgeResult = mapOf(
+                        "criteria" to mapOf(
+                            "quality" to mapOf("score" to 5, "reason" to "Boa qualidade geral."),
+                            "coherence" to mapOf("score" to 4, "reason" to "Resposta consistente."),
+                            "context" to mapOf("score" to 5, "reason" to "Atende ao contexto.")
+                        )
+                    )
                 ),
                 evaluationRow(
                     evaluationId = "eval-2",
@@ -72,7 +87,16 @@ class LlmJudgeMetricsServiceTests {
                     judgeDurationMs = 250.0,
                     sourceTotalTokens = 500,
                     judgeTotalTokens = 100,
-                    judgeRejectionReasons = listOf("falta contexto", "falta contexto")
+                    judgeSummary = "Resposta incompleta.",
+                    judgeScores = mapOf(
+                        "quality" to 2,
+                        "coherence" to 1,
+                        "context" to 1
+                    ),
+                    judgeRejectionReasons = listOf(
+                        mapOf("code" to "missing_context", "message" to "falta contexto"),
+                        mapOf("code" to "missing_context", "message" to "falta contexto")
+                    )
                 )
             )
         )
@@ -100,6 +124,14 @@ class LlmJudgeMetricsServiceTests {
         assertEquals(33.33, response.summary.failureRatePercent)
         assertEquals(50.0, response.summary.approvalRatePercent)
         assertEquals(0.55, response.summary.averageOverallScore)
+        assertEquals(
+            listOf(
+                LlmJudgeCriterionScoreResponse(key = "quality", score = 3.5),
+                LlmJudgeCriterionScoreResponse(key = "coherence", score = 2.5),
+                LlmJudgeCriterionScoreResponse(key = "context", score = 3.0)
+            ),
+            response.summary.averageCriteriaScores
+        )
         assertEquals(1333.33, response.summary.averageSourceDurationMs)
         assertEquals(275.0, response.summary.averageJudgeDurationMs)
         assertEquals(550.0, response.summary.averageSourceTotalTokens)
@@ -109,6 +141,15 @@ class LlmJudgeMetricsServiceTests {
         assertEquals("falta contexto", response.topRejectionReasons.first().key)
         assertEquals(2, response.topRejectionReasons.first().count)
         assertEquals("eval-3", response.recentEvaluations.first().evaluationId)
+        assertEquals("conv-eval-3", response.recentEvaluations.first().conversationId)
+        assertEquals("user-eval-3", response.recentEvaluations.first().userId)
+        assertEquals("req-eval-3", response.recentEvaluations.first().requestId)
+        assertEquals("msg-eval-3", response.recentEvaluations.first().messageId)
+        assertEquals("Resposta adequada e objetiva.", response.recentEvaluations.first().judgeSummary)
+        assertEquals("quality", response.recentEvaluations.first().criteria.first().key)
+        assertEquals(5.0, response.recentEvaluations.first().criteria.first().score)
+        assertEquals("Boa qualidade geral.", response.recentEvaluations.first().criteria.first().reason)
+        assertEquals(listOf("Adicionar um exemplo pratico."), response.recentEvaluations.first().judgeImprovements)
         assertEquals("nutrition", response.byFeature.first().key)
     }
 
@@ -118,7 +159,7 @@ class LlmJudgeMetricsServiceTests {
             supabaseClient.get(
                 eqValue("llm_judge_evaluations"),
                 eqValue(
-                    "evaluation_id,created_at,feature,judge_status,idioma,pipeline,handler,source_model,source_duration_ms,source_total_tokens,judge_duration_ms,judge_total_tokens,judge_overall_score,judge_decision,judge_rejection_reasons"
+                    "evaluation_id,created_at,conversation_id,user_id,request_id,message_id,feature,judge_status,idioma,pipeline,handler,source_model,source_duration_ms,source_total_tokens,judge_duration_ms,judge_total_tokens,judge_overall_score,judge_decision,judge_summary,judge_scores,judge_improvements,judge_rejection_reasons,judge_result"
                 ),
                 eqValue(
                     mapOf(
@@ -183,16 +224,28 @@ class LlmJudgeMetricsServiceTests {
         createdAt: String,
         feature: String,
         judgeStatus: String,
+        conversationId: String = "conv-$evaluationId",
+        userId: String = "user-$evaluationId",
+        requestId: String = "req-$evaluationId",
+        messageId: String = "msg-$evaluationId",
         judgeDecision: String? = null,
         judgeOverallScore: Double? = null,
         sourceDurationMs: Double? = null,
         judgeDurationMs: Double? = null,
         sourceTotalTokens: Int? = null,
         judgeTotalTokens: Int? = null,
-        judgeRejectionReasons: List<Any?> = emptyList()
+        judgeSummary: String? = null,
+        judgeScores: Map<String, Any?> = emptyMap(),
+        judgeImprovements: List<Any?> = emptyList(),
+        judgeRejectionReasons: List<Any?> = emptyList(),
+        judgeResult: Map<String, Any?>? = null
     ) = SupabaseLlmJudgeEvaluationRow(
         evaluationId = evaluationId,
         createdAt = createdAt,
+        conversationId = conversationId,
+        userId = userId,
+        requestId = requestId,
+        messageId = messageId,
         feature = feature,
         judgeStatus = judgeStatus,
         idioma = "pt-BR",
@@ -205,7 +258,11 @@ class LlmJudgeMetricsServiceTests {
         judgeTotalTokens = judgeTotalTokens,
         judgeOverallScore = judgeOverallScore,
         judgeDecision = judgeDecision,
-        judgeRejectionReasons = judgeRejectionReasons
+        judgeSummary = judgeSummary,
+        judgeScores = judgeScores,
+        judgeImprovements = judgeImprovements,
+        judgeRejectionReasons = judgeRejectionReasons,
+        judgeResult = judgeResult
     )
 
     private fun <T> eqValue(value: T): T {
