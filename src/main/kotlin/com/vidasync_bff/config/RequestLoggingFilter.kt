@@ -1,7 +1,9 @@
 package com.vidasync_bff.config
 
+import com.vidasync_bff.observability.AgentTelemetryContext
 import com.vidasync_bff.observability.HttpMetricsRegistry
 import com.vidasync_bff.observability.TraceContext
+import com.vidasync_bff.service.TelemetryService
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -13,12 +15,14 @@ import org.springframework.web.util.ContentCachingRequestWrapper
 import org.springframework.web.util.ContentCachingResponseWrapper
 import java.net.SocketTimeoutException
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.TimeoutException
 
 @Component
 @Order(2)
 class RequestLoggingFilter(
-    private val metricsRegistry: HttpMetricsRegistry
+    private val metricsRegistry: HttpMetricsRegistry,
+    private val telemetryService: TelemetryService
 ) : OncePerRequestFilter() {
 
     private val log = LoggerFactory.getLogger("vidasync.http")
@@ -30,6 +34,23 @@ class RequestLoggingFilter(
     ) {
         val traceId = TraceContext.resolveOrCreate(request.getHeader(TraceContext.TRACE_HEADER))
         TraceContext.put(traceId)
+        val requestId = UUID.randomUUID().toString().replace("-", "")
+        AgentTelemetryContext.startRun(
+            requestId = requestId,
+            traceId = traceId,
+            agent = resolveAgent(request.requestURI),
+            endpoint = request.requestURI,
+            httpMethod = request.method,
+            requestContext = mapOf(
+                "path" to request.requestURI,
+                "query" to sanitize(request.queryString ?: ""),
+                "contentType" to request.contentType,
+                "contentLength" to request.contentLengthLong,
+                "remoteAddr" to request.remoteAddr,
+                "userId" to request.getHeader("X-User-Id"),
+                "userAgent" to request.getHeader("User-Agent")
+            )
+        )
 
         val wrappedRequest = ContentCachingRequestWrapper(request)
         val wrappedResponse = ContentCachingResponseWrapper(response)
@@ -98,6 +119,19 @@ class RequestLoggingFilter(
             }
 
             wrappedResponse.setHeader(TraceContext.TRACE_HEADER, traceId)
+            telemetryService.flushQuietly(
+                AgentTelemetryContext.completeRun(
+                    httpStatus = statusCode,
+                    status = when {
+                        timeout -> "timeout"
+                        failure == null && statusCode < 400 -> "success"
+                        else -> "error"
+                    },
+                    durationMs = durationMs,
+                    timeout = timeout,
+                    errorMessage = failure?.message ?: if (statusCode >= 400) "HTTP $statusCode" else null
+                )
+            )
             wrappedResponse.copyBodyToResponse()
             TraceContext.clear()
         }
@@ -163,5 +197,17 @@ class RequestLoggingFilter(
             current = current.cause
         }
         return false
+    }
+
+    private fun resolveAgent(path: String): String {
+        val normalized = path.trim().trim('/')
+        if (normalized.isBlank()) return "root"
+        return when {
+            normalized.startsWith("internal/admin/llm-judge") -> "llm_judge"
+            normalized.startsWith("internal/admin/telemetry") -> "telemetry_admin"
+            normalized.startsWith("internal/admin/notifications") -> "notifications_admin"
+            normalized.startsWith("internal/admin/users") -> "users_admin"
+            else -> normalized.substringBefore('/').replace("-", "_")
+        }
     }
 }

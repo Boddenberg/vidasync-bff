@@ -4,6 +4,7 @@ import com.vidasync_bff.dto.ai.AIGatewayOpenAIChatRequest
 import com.vidasync_bff.dto.ai.AIGatewayOpenAIChatResponse
 import com.vidasync_bff.dto.ai.AIGatewayRouteRequest
 import com.vidasync_bff.dto.ai.AIGatewayRouteResponse
+import com.vidasync_bff.observability.AgentTelemetryContext
 import com.vidasync_bff.observability.TraceContext
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
@@ -167,6 +168,7 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
                 response.warnings?.size ?: 0,
                 String.format(Locale.US, "%.4f", durationMs),
             )
+            recordOperationalTelemetry(operation, path, response, durationMs)
             response
         } catch (e: HttpStatusCodeException) {
             val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
@@ -183,6 +185,18 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
                 String.format(Locale.US, "%.4f", durationMs),
                 responseBody,
                 e,
+            )
+            AgentTelemetryContext.recordStageEvent(
+                stage = operation,
+                eventType = if (timeout) "timeout" else "error",
+                status = "error",
+                durationMs = durationMs,
+                detail = "AI Gateway returned HTTP error",
+                payload = mapOf(
+                    "path" to path,
+                    "statusCode" to statusCode,
+                    "timeout" to timeout
+                )
             )
             throw AIGatewayRequestException(
                 message = "Falha ao chamar AI Gateway em $operation: HTTP $statusCode",
@@ -203,6 +217,17 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
                 e::class.java.simpleName,
                 e.message,
                 e,
+            )
+            AgentTelemetryContext.recordStageEvent(
+                stage = operation,
+                eventType = if (timeout) "timeout" else "error",
+                status = "error",
+                durationMs = durationMs,
+                detail = e.message,
+                payload = mapOf(
+                    "path" to path,
+                    "timeout" to timeout
+                )
             )
             throw AIGatewayRequestException(
                 message = "Falha ao chamar AI Gateway em $operation: ${e.message}",
@@ -251,6 +276,28 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
                 warnings,
                 String.format(Locale.US, "%.4f", durationMs),
             )
+            AgentTelemetryContext.recordLlmCall(
+                provider = "openai",
+                operation = operation,
+                model = response.model,
+                status = response.status ?: "success",
+                inputTokens = response.usage?.inputTokens,
+                outputTokens = response.usage?.outputTokens,
+                totalTokens = response.usage?.totalTokens,
+                durationMs = durationMs,
+                providerResponseId = response.providerResponseId,
+                endpoint = path,
+                metadata = mapOf("warningsCount" to warnings)
+            )
+            if (warnings > 0) {
+                AgentTelemetryContext.recordStageEvent(
+                    stage = operation,
+                    eventType = "warning",
+                    status = "completed",
+                    detail = "AI Gateway returned warnings",
+                    payload = mapOf("warningsCount" to warnings)
+                )
+            }
             response
         } catch (e: HttpStatusCodeException) {
             val durationMs = (System.nanoTime() - startedNs) / 1_000_000.0
@@ -267,6 +314,18 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
                 String.format(Locale.US, "%.4f", durationMs),
                 responseBody,
                 e,
+            )
+            AgentTelemetryContext.recordLlmCall(
+                provider = "openai",
+                operation = operation,
+                status = "error",
+                durationMs = durationMs,
+                endpoint = path,
+                errorMessage = "HTTP $statusCode",
+                metadata = mapOf(
+                    "statusCode" to statusCode,
+                    "timeout" to timeout
+                )
             )
             throw AIGatewayRequestException(
                 message = "Falha ao chamar AI Gateway em $operation: HTTP $statusCode",
@@ -287,6 +346,15 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
                 e::class.java.simpleName,
                 e.message,
                 e,
+            )
+            AgentTelemetryContext.recordLlmCall(
+                provider = "openai",
+                operation = operation,
+                status = "error",
+                durationMs = durationMs,
+                endpoint = path,
+                errorMessage = e.message,
+                metadata = mapOf("timeout" to timeout)
             )
             throw AIGatewayRequestException(
                 message = "Falha ao chamar AI Gateway em $operation: ${e.message}",
@@ -312,5 +380,53 @@ class AIGatewayClient(private val aiGatewayRestClient: RestClient) {
             current = current.cause
         }
         return false
+    }
+
+    private fun recordOperationalTelemetry(
+        operation: String,
+        path: String,
+        response: AIGatewayRouteResponse,
+        durationMs: Double
+    ) {
+        val warningsCount = response.warnings?.size ?: 0
+        if (!response.model.isNullOrBlank() || response.usage != null || !response.providerResponseId.isNullOrBlank()) {
+            AgentTelemetryContext.recordLlmCall(
+                provider = "ai_gateway",
+                operation = operation,
+                model = response.model,
+                status = response.status ?: "success",
+                inputTokens = response.usage?.inputTokens,
+                outputTokens = response.usage?.outputTokens,
+                totalTokens = response.usage?.totalTokens,
+                durationMs = durationMs,
+                providerResponseId = response.providerResponseId,
+                endpoint = path,
+                metadata = mapOf("warningsCount" to warningsCount)
+            )
+        }
+        AgentTelemetryContext.recordStageEvent(
+            stage = operation,
+            eventType = "flow",
+            status = if (response.status.equals("erro", ignoreCase = true)) "error" else "completed",
+            durationMs = durationMs,
+            detail = "AI Gateway call completed",
+            payload = mapOf(
+                "path" to path,
+                "warningsCount" to warningsCount,
+                "needsReview" to (response.precisaRevisao == true)
+            )
+        )
+        if (warningsCount > 0 || response.precisaRevisao == true) {
+            AgentTelemetryContext.recordStageEvent(
+                stage = operation,
+                eventType = "warning",
+                status = "completed",
+                detail = "AI Gateway returned warnings or review flags",
+                payload = mapOf(
+                    "warningsCount" to warningsCount,
+                    "needsReview" to (response.precisaRevisao == true)
+                )
+            )
+        }
     }
 }

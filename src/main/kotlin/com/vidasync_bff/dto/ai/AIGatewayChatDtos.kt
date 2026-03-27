@@ -15,6 +15,7 @@ data class AIGatewayOpenAIChatRequest(
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class AIGatewayOpenAIChatResponse(
     val model: String? = null,
+    val status: String? = null,
     val response: String? = null,
     @JsonProperty("conversation_id")
     val conversationId: String? = null,
@@ -22,6 +23,12 @@ data class AIGatewayOpenAIChatResponse(
     val intencaoDetectada: Map<String, Any?>? = null,
     val roteamento: Map<String, Any?>? = null,
     val memoria: Map<String, Any?>? = null,
+    val usage: AIGatewayUsageResponse? = null,
+    val metadata: Map<String, Any?>? = null,
+    @JsonProperty("provider_response_id")
+    val providerResponseId: String? = null,
+    @JsonProperty("duration_ms")
+    val durationMs: Double? = null,
     @JsonProperty("trace_id")
     val traceId: String? = null
 )
